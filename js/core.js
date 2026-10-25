@@ -11,7 +11,7 @@
   'use strict';
 
   const D = (window.__DYC = {
-    VER: '1.3.8',
+    VER: '1.3.9',
     debug: false,
 
     // 浮层静止 / 移出视频画面后多久自动隐藏（毫秒）

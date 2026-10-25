@@ -8,7 +8,11 @@
  * 另外加了冷却：1.5 秒内最多跳过一条，避免误判时连环跳视频。
  *
  * 直播：用户会主动看直播，所以**不再把直播视频当成广告跳过**（去掉了"直播中"徽标与 .flv 判定）。
- * 带货：这类视频没有"广告"徽标（左下角是"购物"卡片、账号名是"XX旗舰店"），所以新增两条判定。
+ * 带货：这类视频没有"广告"徽标，最稳的标志是画面左下角那颗"购物 / 商品名"小卡片
+ * （位置固定、不随画面变化、也不会隐藏），其次是电商账号名。
+ *
+ * 状态跟着"当前这条视频"走，不挂在 <video> 元素上 —— 抖音始终复用同一个元素播放
+ * 所有视频，状态挂在元素上会导致第一条视频判满次数后，后面全部视频被直接放过。
  *
  * 头像旁弹出的"直播/推广小窗"自动关闭：小窗不是列表里的视频，但右上角有原生关闭按钮。
  * 开销控制：页面里的 <video> 本来就只有几个，先按"小尺寸非主视频"找；
@@ -21,59 +25,63 @@
   // 只保留"广告 / 推广 / 赞助"这类明确标注；直播不再跳过（用户需要看直播）
   const BADGES = ['广告', '推广', '赞助'];
   // 带货视频没有"广告"徽标，但左下角会有"购物"卡片、账号名常是"XX旗舰店/专卖店"
-  const SHOP_CHIP_RE = /^(购物|商品|小店|橱窗|去购买|立即购买|商品详情|同款商品)/;
+  // 卡片样式：购物车图标 + "购物/商品名"，所以关键词后面通常紧跟分隔符；没有分隔符时
+  // 必须带图标才算，避免把"购物分享"这种普通文案误判成带货。
+  const SHOP_CHIP_RE = /^(购物|商品|小店|橱窗|去购买|立即购买|商品详情|同款商品)([／/｜|·:：]|$)/;
   const SHOP_NAME_RE = /(旗舰店|专卖店|专营店|官方店|企业店|小店)$/;
-  const passes = new WeakMap();     // video -> 已判定次数
-  const blocked = new WeakSet();
+  // 抖音复用同一个 <video> 元素播放所有视频，判定状态不能挂在元素上：
+  // 元素上的计数一旦用满、或已判成广告，后面所有视频都会被直接放过。
+  // 状态改成跟着"当前这条视频"走，用时长（换清晰度不会变）作为身份。
+  let st = { key: '', passes: 0, blocked: false, last: 0 };
   let lastSkip = 0;
+
+  function videoKey(v) {
+    const d = v.duration || 0;
+    return d > 0 ? 'd' + Math.round(d * 100) : 's' + (v.currentSrc || v.src || '').slice(-40);
+  }
 
   function cardOf(video) {
     return video.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"], .slider-video') ||
       video.parentElement || document.body;
   }
 
-  // 只认"小徽标"：文本恰好是广告/推广/赞助/直播中，且元素尺寸像标签
-  function badgeHit(root, vr) {
+  // 卡片内的文字扫描：一次遍历同时判"广告徽标"和"购物卡片"
+  // 不再要求元素是叶子节点 —— 购物卡片是"图标 + 购物/ + 商品名"的复合结构，
+  // 文本落在带子元素的容器上；也不再限制 3 个字（"购物/厚切吐司面包"就超了）。
+  function textHit(root, vr) {
     if (!root || !root.querySelectorAll) return '';
+    let chip = '';
     let n = 0;
-    for (const el of root.querySelectorAll('span, div, i, em, b, p')) {
-      if (++n > 600) break;
-      if (el.children.length) continue;
+    for (const el of root.querySelectorAll('span, div, i, em, b, p, a')) {
+      if (++n > 900) break;
       const t = D.textOf(el);
-      if (!t || t.length > 3) continue;
-      if (BADGES.indexOf(t) === -1) continue;
+      if (!t || t.length > 24) continue;
+
+      // ① 广告徽标：文本恰好是"广告/推广/赞助"
+      if (t.length <= 3 && BADGES.indexOf(t) !== -1) {
+        const rb = el.getBoundingClientRect();
+        if (rb.width < 6 || rb.height < 6) continue;
+        if (rb.width > 160 || rb.height > 48) continue;
+        if (vr && !D.near(rb, vr, 40)) continue;
+        return t;
+      }
+
+      // ② 购物卡片
+      if (chip) continue;
+      if (!SHOP_CHIP_RE.test(t) && !(/^(购物|商品)/.test(t) && el.querySelector('img, svg, i'))) continue;
       const r = el.getBoundingClientRect();
       if (r.width < 6 || r.height < 6) continue;
-      if (r.width > 160 || r.height > 48) continue;      // 大面积文案不算徽标
-      if (vr && !D.near(r, vr, 60)) continue;
-      return t;
+      if (r.width > 320 || r.height > 64) continue;
+      if (vr && !D.near(r, vr, 40)) continue;
+      chip = '购物卡片';
     }
-    return '';
+    return chip;
   }
 
   function attrHit(root) {
     if (!root || !root.querySelectorAll) return '';
-    const el = root.querySelector('[data-e2e*="advert" i], [aria-label="广告"], img[alt="广告"]');
+    const el = root.querySelector('[data-e2e*="advert" i], [aria-label="广告"], img[alt="广告"], img[alt*="购物"], img[alt*="商品"], [aria-label*="购物"]');
     return el ? 'ad' : '';
-  }
-
-  // 带货视频的标志：播放器左下角那颗"购物 / 商品"小卡片
-  function shopChipHit(root, vr) {
-    if (!root || !root.querySelectorAll) return '';
-    let n = 0;
-    for (const el of root.querySelectorAll('span, div, i, em, b, p, a')) {
-      if (++n > 600) break;
-      if (el.children.length) continue;
-      const t = D.textOf(el);
-      if (!t || t.length > 8) continue;
-      if (!SHOP_CHIP_RE.test(t)) continue;
-      const r = el.getBoundingClientRect();
-      if (r.width < 6 || r.height < 6) continue;
-      if (r.width > 140 || r.height > 44) continue;
-      if (vr && !D.near(r, vr, 40)) continue;
-      return '购物卡片';
-    }
-    return '';
   }
 
   // 电商账号：旗舰店 / 专卖店 / 小店这类名称基本只做带货
@@ -97,10 +105,12 @@
   function detect(video) {
     const vr = video.getBoundingClientRect();
     const card = cardOf(video);
-    let hit = badgeHit(card, vr);
-    if (!hit) hit = attrHit(card);
-    if (!hit) hit = shopChipHit(card, vr);
+    let hit = attrHit(card);
+    if (!hit) hit = textHit(card, vr);
     if (!hit) hit = shopAuthorHit(card, vr);
+    // 兜底：卡片容器认错时（视频不在预期的卡片结构里），
+    // 退一步在整页找"贴着视频画面"的购物卡片 —— 它固定在左下角，不随画面变化。
+    if (!hit && card !== document.body) hit = textHit(document.body, vr);
     return hit;
   }
 
@@ -135,18 +145,27 @@
     if (!document.documentElement.classList.contains('dyc-feed')) return;
     if (video !== D.playingVideo()) return;
 
-    const n = passes.get(video) || 0;
-    if (n >= 4) return;                 // 最多判 4 次：购物卡片有时比视频晚出现
-    passes.set(video, n + 1);
+    // 换视频就重置判定状态（抖音复用同一个元素，元素上的状态不能跨视频沿用）
+    const key = videoKey(video);
+    if (key !== st.key) st = { key, passes: 0, blocked: false, last: 0 };
+
+    const now = Date.now();
+    if (now - st.last < 500) return;    // 同一视频短时间内别重复扫
+    st.last = now;
+
+    if (st.passes >= 4) return;         // 最多判 4 次：购物卡片有时比视频晚出现
+    st.passes++;
 
     const reason = detect(video);
+    D.log('filter: 检查', reason || '未命中');
+
     if (!reason) {
-      if (n + 1 < 4) setTimeout(() => judge(video), n === 0 ? 900 : 1500);
+      if (st.passes < 4) setTimeout(() => judge(video), st.passes === 1 ? 900 : 1500);
       return;
     }
 
-    if (!blocked.has(video)) {
-      blocked.add(video);
+    if (!st.blocked) {
+      st.blocked = true;
       D.log('filter: 识别到', reason, '，跳过该视频');
       next(video);
     }
@@ -265,10 +284,17 @@
     probe() {
       const v = D.playingVideo();
       if (!v) return null;
-      return { hit: detect(v) || null, muted: v.muted, paused: v.paused };
+      return {
+        hit: detect(v) || null,
+        key: videoKey(v),
+        passes: st.passes,
+        muted: v.muted,
+        paused: v.paused
+      };
     },
     reset() {
-      // 状态挂在元素上，无需额外清理；只重置低频扫描计时
+      st = { key: '', passes: 0, blocked: false, last: 0 };
+      lastSkip = 0;
       lastScan = 0;
     }
   };

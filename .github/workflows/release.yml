@@ -1,7 +1,9 @@
 name: Release
 
 # 推送 v* 标签即自动打包扩展并发布 Release：
-#   git tag v1.3.8 && git push origin v1.3.8
+#   git tag v1.3.9 && git push origin v1.3.9
+# Release 说明取自仓库里的 .github/release-notes.md（发版前手工写明本次改动），
+# 该文件不存在时才退回按提交记录自动生成。
 on:
   push:
     tags:
@@ -24,10 +26,20 @@ jobs:
           zip -r "${NAME}.zip" manifest.json css js icons README.md LICENSE
           ls -lh "${NAME}.zip"
 
+      - name: 准备 Release 说明
+        run: |
+          if [ -f .github/release-notes.md ]; then
+            cp .github/release-notes.md notes.md
+            echo "使用 .github/release-notes.md"
+          else
+            echo "本次发布没有单独写说明，改动见提交记录。" > notes.md
+          fi
+          cat notes.md
+
       - name: 发布 Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" "douyin-clean-${GITHUB_REF_NAME}.zip" \
             --title "抖音净播 ${GITHUB_REF_NAME}" \
-            --generate-notes
+            --notes-file notes.md
