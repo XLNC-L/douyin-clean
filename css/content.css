@@ -1,0 +1,82 @@
+/* 抖音净播 v1.3.2
+ * 全部视觉改动都在这一份静态 CSS 里完成：进入页面后运行时零成本。
+ * 所有规则都以 html.dyc-feed 为前提，只在"刷视频"页面生效。
+ * html.dyc-ui-on 由 JS 按鼠标状态切换：进入视频画面或在画面上移动即显示，
+ * 停止移动 2 秒 / 移出画面 2 秒后移除，浮层随即淡出。
+ */
+
+/* ========== 1. 左侧导航：整条隐藏（不做抽屉） ========== */
+/* 只动抖音自己的左侧导航容器，不能写 aside —— 私信抽屉等右侧面板也是 aside，
+ * 整类隐藏会把它们一起藏掉，表现为"点消息没反应"。 */
+html.dyc-feed #douyin-navigation {
+  display: none !important;
+}
+
+/* ========== 2. 视频浮层：左下文案 + 右侧互动栏 ========== */
+/* 过渡只加在需要淡入淡出的元素上 */
+html.dyc-feed .video-info-detail,
+html.dyc-feed [data-e2e="video-player-digg"],
+html.dyc-feed [data-e2e="feed-comment-icon"],
+html.dyc-feed [data-e2e="video-player-collect"],
+html.dyc-feed [data-e2e="video-player-share"],
+html.dyc-feed .xgplayer-controls,
+html.dyc-feed .slider-video [data-e2e*="avatar"],
+html.dyc-feed .slider-video [data-e2e*="follow"],
+html.dyc-feed .slider-video > *,
+html.dyc-feed [data-dyc-ui] {
+  transition: opacity 0.18s ease !important;
+}
+
+/* 需要自动隐藏的浮层，下面几组规则互相兜底：
+ *   ① 播放卡片里"不含 video 的直接子层"（浮层一般挂在卡片这一层；含 video 的是播放器，绝不能动）；
+ *   ② 左下文案 .video-info-detail；
+ *   ③ 右侧互动按钮本身（按 data-e2e 定位，类名被哈希化也不受影响）；
+ *   ④ 作者头像 / 关注按钮（评论输入框里的头像排除在外）；
+ *   ⑤ 底部播放控制条（含最右侧的省略号）——抖音自己要等 5~8 秒才收，这里统一到 2 秒；
+ *   ⑥ JS 精确标记过的 [data-dyc-ui]。
+ * 评论区是用户手动开关的，用 [data-e2e="comment-list"] 从①里排除掉。 */
+html.dyc-feed:not(.dyc-ui-on) .slider-video > *:not(:has(video)):not(:has([data-e2e="comment-list"])),
+html.dyc-feed:not(.dyc-ui-on) .video-info-detail,
+html.dyc-feed:not(.dyc-ui-on) [data-e2e="video-player-digg"],
+html.dyc-feed:not(.dyc-ui-on) [data-e2e="feed-comment-icon"],
+html.dyc-feed:not(.dyc-ui-on) [data-e2e="video-player-collect"],
+html.dyc-feed:not(.dyc-ui-on) [data-e2e="video-player-share"],
+html.dyc-feed:not(.dyc-ui-on) .slider-video :not([data-e2e*="comment"]) [data-e2e*="avatar"],
+html.dyc-feed:not(.dyc-ui-on) .slider-video :not([data-e2e*="comment"]) [data-e2e*="follow"],
+html.dyc-feed:not(.dyc-ui-on) .xgplayer-controls,
+html.dyc-feed:not(.dyc-ui-on) [data-dyc-ui] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* ========== 3. 顶栏多余图标 ========== */
+html.dyc-feed [data-dyc-hide] {
+  display: none !important;
+}
+
+/* ========== 4. 清晰度弹层：脚本切换档位时临时展开 ========== */
+/* 抖音的档位列表只在真实鼠标悬停时才显示，合成事件打不开。
+ * 因此脚本先给组件加 .dyc-open：整条链强制 display/visibility/pointer-events，
+ * 保证每个档位都有真实的屏幕坐标（否则 getBoundingClientRect 全为 0，点不到），
+ * 同时把透明度压到 0.01（肉眼不可见），点完立即移除。 */
+html.dyc-feed .xgplayer-playclarity-setting.dyc-open,
+html.dyc-feed .xgplayer-playclarity-setting.dyc-open .gear,
+html.dyc-feed .xgplayer-playclarity-setting.dyc-open .virtual {
+  display: block !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  opacity: 0.01 !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+  z-index: 2147483000 !important;
+}
+
+html.dyc-feed .xgplayer-playclarity-setting.dyc-open * {
+  visibility: visible !important;
+  pointer-events: auto !important;
+}
+
+/* ========== 5. 直播 / 广告 ========== */
+/* 不在这里做视觉处理：命中后由 JS 直接切下一条。
+ * 删除卡片节点会破坏抖音的滚动吸附与虚拟列表，那才是刷视频卡顿的根源。 */
