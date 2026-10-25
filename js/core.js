@@ -11,7 +11,7 @@
   'use strict';
 
   const D = (window.__DYC = {
-    VER: '1.3.7',
+    VER: '1.3.8',
     debug: false,
 
     // 浮层静止 / 移出视频画面后多久自动隐藏（毫秒）
@@ -23,7 +23,7 @@
     QUALITY_RANK: ['4K', '蓝光', '2K', '超清', '高清', '标清', '智能', '流畅'],
 
     KEEP_RE: /(通知|消息|私信|notification|message|inbox|im-entry|avatar)/i,
-    BLOCK_WORDS: ['广告', '直播中', '直播', '推广', '赞助'],
+    BLOCK_WORDS: ['广告', '推广', '赞助'],
 
     SEL: {
       aside: 'aside',
