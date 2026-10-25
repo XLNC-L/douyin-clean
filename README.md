@@ -28,12 +28,23 @@
 
 ## 安装
 
-1. 下载 / 克隆本仓库；
-2. 打开 `chrome://extensions`，右上角开启「开发者模式」；
-3. 点「加载已解压的扩展程序」，选择本仓库目录（含 `manifest.json` 的那一层）；
-4. 打开 `https://www.douyin.com/` 即可生效。
+### 方式一：下载 Release 压缩包（推荐）
 
-更新代码后，在扩展管理页点一下「刷新」按钮，再刷新抖音页面。
+1. 打开 [Releases](https://github.com/XLNC-L/douyin-clean/releases/latest)，下载最新的 `douyin-clean-v*.zip`；
+2. 解压到一个固定目录（之后不要删，Chrome 会一直从这里加载）；
+3. 打开 `chrome://extensions`，右上角开启「开发者模式」；
+4. 点「加载已解压的扩展程序」，选择解压后的目录（含 `manifest.json` 的那一层）；
+5. 打开 `https://www.douyin.com/` 即可生效。
+
+升级时下载新 Release 覆盖原目录，再到扩展管理页点一下「刷新」按钮，刷新抖音页面。
+
+### 方式二：克隆仓库
+
+```bash
+git clone https://github.com/XLNC-L/douyin-clean.git
+```
+
+然后用「加载已解压的扩展程序」选择仓库目录。
 
 ## 调试
 
