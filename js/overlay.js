@@ -65,8 +65,24 @@
   }
 
   function clearMarks() {
-    marked.forEach(el => el.removeAttribute('data-dyc-ui'));
+    marked.forEach(el => {
+      el.removeAttribute('data-dyc-ui');
+      el.removeAttribute('data-dyc-instant');
+    });
     marked = [];
+  }
+
+  // 始终隐藏的推广卡片（游戏卡片）：用 data-dyc-hide，不跟浮层显隐；
+  // 单独记录，扩展关闭/切页时能恢复。
+  let permanent = [];
+  function hidePermanent(el) {
+    if (!el || el.nodeType !== 1) return;
+    el.setAttribute('data-dyc-hide', '');
+    if (permanent.indexOf(el) === -1) permanent.push(el);
+  }
+  function clearPermanent() {
+    permanent.forEach(el => el.removeAttribute('data-dyc-hide'));
+    permanent = [];
   }
 
   function mark(el) {
@@ -89,6 +105,28 @@
       else if (best) break;
     }
     return best;
+  }
+
+  // 当前屏幕上这张活动卡片里的视频。暂停后 D.playingVideo() 可能退回预加载卡片，
+  // 用它的矩形判断鼠标位置会导致"鼠标在画面上却一直判定为画面外"。
+  function activeVideo() {
+    const active = document.querySelector('[data-e2e="feed-active-video"]');
+    const v = active && active.querySelector('video');
+    if (!v) return null;
+    const r = v.getBoundingClientRect();
+    return (r.width > 0 && r.height > 0) ? v : null;
+  }
+
+  // 暂停时 video 元素可能被隐藏（矩形为 0），但活动卡片本身仍有尺寸；
+  // 用卡片矩形兜底，鼠标在画面上移动时依然能唤出浮层。
+  function activeRect() {
+    const active = document.querySelector('[data-e2e="feed-active-video"]');
+    if (!active) return null;
+    const v = active.querySelector('video');
+    const vr = v && v.getBoundingClientRect();
+    if (vr && vr.width > 0 && vr.height > 0) return vr;
+    const ar = active.getBoundingClientRect();
+    return (ar.width > 0 && ar.height > 0) ? ar : null;
   }
 
   function markInfo(vr) {
@@ -217,7 +255,7 @@
   }
 
   // 画面左下角的游戏卡片（例如「游戏 原神 · 评分高达9.3」）。
-  // 类名同样是哈希，按小尺寸 + 固定文案定位；标记后跟标题/互动栏一起显隐。
+  // 类名同样是哈希，按小尺寸 + 固定文案定位；直接永久隐藏，避免跟着浮层切换时慢半拍。
   function markGame(v, vr) {
     // 优先用整张活动卡：游戏卡片可能挂在播放器外层，cardOf 只到 .slider-video 会漏
     const card = v.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"]') ||
@@ -237,7 +275,7 @@
     let n = 0;
     for (const el of card.querySelectorAll('[class*="game-anchor" i], [data-e2e*="game-anchor" i], [class*="gameAnchor" i]')) {
       if (++n > 6) break;
-      if (near(el)) { mark(el); return; }
+      if (near(el)) { hidePermanent(el); return; }
     }
 
     // 2) 按文案找小卡片；向上取到包含它的最大小容器，连图标一起藏
@@ -254,7 +292,49 @@
         if (!/评分高达|^游戏.*评分/.test(D.textOf(p))) break;
         box = p;
       }
-      mark(box);
+      hidePermanent(box);
+      return;
+    }
+  }
+
+  // 画面左下角的「某某 推荐」卡片：跟视频信息一起显隐，但去掉过渡，
+  // 避免像游戏卡片那样比标题慢半拍。
+  function markRecommend(v, vr) {
+    const card = v.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"]') ||
+      cardOf(v, vr) || v.parentElement;
+    if (!card) return;
+
+    const near = el => {
+      const r = el.getBoundingClientRect();
+      if (r.width < 40 || r.height < 12 || r.width > 320 || r.height > 48) return null;
+      if (vr.width && !D.near(r, vr, 48)) return null;
+      if (vr.width && r.left > vr.left + vr.width * 0.6) return null;    // 只认画面左侧
+      if (vr.height && r.top < vr.top + vr.height * 0.45) return null;   // 只认下半部
+      if (el.closest('[data-e2e*="comment"], [class*="comment-list"], [class*="comment-panel"]')) return null;
+      if (el.closest('.video-info-detail, [data-e2e*="video-info"]')) return null;
+      return r;
+    };
+
+    const instant = el => {
+      el.setAttribute('data-dyc-instant', '');
+      mark(el);
+    };
+
+    let n = 0;
+    for (const el of card.querySelectorAll('div, span, a, section')) {
+      if (++n > 900) break;
+      if (!near(el)) continue;
+      const t = D.textOf(el);
+      if (!t || t.length > 24 || !/推荐$/.test(t)) continue;
+      // 向上取到包含图标的最大小容器，连图标一起藏
+      let box = el;
+      while (box.parentElement && box.parentElement !== card) {
+        const p = box.parentElement;
+        if (!near(p)) break;
+        if (!/推荐$/.test(D.textOf(p))) break;
+        box = p;
+      }
+      instant(box);
       return;
     }
   }
@@ -265,6 +345,7 @@
       timer = 0;
       if (!html.classList.contains('dyc-ui-on')) html.classList.add('dyc-ui-on');
       clearMarks();
+      clearPermanent();
       currentVideo = null;
       currentRect = null;
       return;
@@ -290,6 +371,7 @@
     markOverlays(v, vr);
     markExtra(v, vr);
     markGame(v, vr);
+    markRecommend(v, vr);
     // 新视频默认保持干净；但鼠标还在画面里时不要突然隐藏，
     // 否则会表现为"刚动一下就瞬间消失"，和 2 秒延迟的规则不一致。
     // 暂停的视频例外：切过去先立即收起一次。
@@ -308,8 +390,14 @@
     // 也不会给每帧增加布局开销。
     const now = performance.now();
     if (!currentRect || now - rectAt > 250) {
-      const v = currentVideo || D.playingVideo();
-      if (v) {
+      // 优先当前活动卡片里的视频：暂停 / 切广告后 currentVideo 可能是预加载卡片
+      const v = activeVideo() || currentVideo || D.playingVideo();
+      if (v && v !== currentVideo) currentVideo = v;
+      const ar = activeRect();
+      if (ar) {
+        currentRect = ar;
+        rectAt = now;
+      } else if (v) {
         currentRect = v.getBoundingClientRect();
         rectAt = now;
       }
@@ -349,6 +437,14 @@
     raf = requestAnimationFrame(onMove);
   }, { passive: true });
 
+  // 滚轮不会触发 pointermove；指针停在画面上滑动滚轮时也让浮层显示
+  document.addEventListener('wheel', e => {
+    if (!html.classList.contains('dyc-feed')) return;
+    pending = e;
+    if (raf) return;
+    raf = requestAnimationFrame(onMove);
+  }, { passive: true });
+
   // 暂停 / 恢复由播放器事件驱动，不轮询。
   // 只认当前在播的那条视频，预加载的相邻视频暂停不会影响当前画面。
   // 暂停瞬间立即收起一次；之后鼠标移动照常显示，静止 2 秒照常收起。
@@ -377,6 +473,7 @@
     applySettings() {
       if (!html.classList.contains('dyc-feed')) {
         clearMarks();
+        clearPermanent();
         return;
       }
       if (!enabled()) {
@@ -384,6 +481,7 @@
         timer = 0;
         if (!html.classList.contains('dyc-ui-on')) html.classList.add('dyc-ui-on');
         clearMarks();
+        clearPermanent();
         currentVideo = null;
         currentRect = null;
         return;
@@ -396,6 +494,7 @@
     },
     reset() {
       clearMarks();
+      clearPermanent();
       hide();
       currentVideo = null;
       currentRect = null;
