@@ -5,7 +5,7 @@
 ![manifest](https://img.shields.io/badge/Manifest-V3-4285F4)
 ![platform](https://img.shields.io/badge/Chrome-Desktop-34A853)
 
-当前版本：[v1.9.0](https://github.com/XLNC-L/douyin-clean/releases/tag/v1.9.0) · [更新日志](CHANGELOG.md)
+当前版本：v1.9.0 · [下载 / Releases](https://github.com/XLNC-L/douyin-clean/releases) · [更新日志](CHANGELOG.md)
 
 ![界面示意：左为默认界面，右为启用扩展后](docs/preview.svg)
 
