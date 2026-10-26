@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" width="1200" height="640" role="img" aria-label="抖音净播 界面示意：默认界面与净播界面对比">
+  <title>抖音净播 · 界面示意</title>
+  <desc>左为网页版抖音默认界面，右侧为启用扩展后的界面：左侧导航、右侧互动栏、顶栏多余图标、视频标题浮层均已移除。</desc>
+
+  <defs>
+    <linearGradient id="vid" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#33404f"/>
+      <stop offset="55%" stop-color="#1e2733"/>
+      <stop offset="100%" stop-color="#12171e"/>
+    </linearGradient>
+    <linearGradient id="vid2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2d5a63"/>
+      <stop offset="55%" stop-color="#1b3a44"/>
+      <stop offset="100%" stop-color="#101b21"/>
+    </linearGradient>
+    <style>
+      .t      { font-family: 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif; }
+      .h      { font-size: 20px; font-weight: 700; fill: #e6edf3; }
+      .sub    { font-size: 13px; fill: #8b949e; }
+      .tag    { font-size: 12px; fill: #25f4ee; }
+      .dim    { font-size: 12px; fill: #5a6472; }
+      .num    { font-size: 11px; font-weight: 700; fill: #0e1116; }
+      .panel  { fill: #16191f; stroke: #2b313b; stroke-width: 1; }
+      .chrome { fill: #1b1f26; }
+      .nav    { fill: #191d24; }
+      .ghost  { fill: none; stroke: #25f4ee; stroke-width: 1.2; stroke-dasharray: 4 3; opacity: .85; }
+      .faint  { fill: none; stroke: #3a424e; stroke-width: 1.2; stroke-dasharray: 4 3; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="640" fill="#0e1116"/>
+
+  <!-- ============ 左：默认 ============ -->
+  <rect class="panel" x="40" y="60" width="540" height="520" rx="14"/>
+  <text class="t h" x="64" y="92">默认</text>
+  <text class="t sub" x="126" y="92">打开 www.douyin.com 的样子</text>
+
+  <g>
+    <!-- 窗口 -->
+    <rect class="chrome" x="60" y="110" width="500" height="40" rx="6"/>
+    <!-- 搜索框 -->
+    <rect x="80" y="120" width="150" height="20" rx="10" fill="#252a33"/>
+    <text class="t dim" x="92" y="134">搜索你感兴趣的内容</text>
+
+    <!-- 顶栏图标（多余项） -->
+    <circle cx="390" cy="130" r="8" fill="#2f3641"/>
+    <circle cx="418" cy="130" r="8" fill="#2f3641"/>
+    <circle cx="446" cy="130" r="8" fill="#2f3641"/>
+    <circle cx="474" cy="130" r="8" fill="#2f3641"/>
+    <circle cx="520" cy="130" r="11" fill="#3a424e"/>
+
+    <!-- 主体 -->
+    <rect class="nav" x="60" y="150" width="130" height="390"/>
+    <!-- 左侧导航项 -->
+    <circle cx="90" cy="190" r="9" fill="#39414d"/>
+    <rect x="108" y="184" width="52" height="9" rx="4" fill="#39414d"/>
+    <circle cx="90" cy="238" r="9" fill="#39414d"/>
+    <rect x="108" y="232" width="52" height="9" rx="4" fill="#39414d"/>
+    <circle cx="90" cy="286" r="9" fill="#39414d"/>
+    <rect x="108" y="280" width="52" height="9" rx="4" fill="#39414d"/>
+    <circle cx="90" cy="334" r="9" fill="#39414d"/>
+    <rect x="108" y="328" width="52" height="9" rx="4" fill="#39414d"/>
+    <circle cx="90" cy="382" r="9" fill="#39414d"/>
+    <rect x="108" y="376" width="52" height="9" rx="4" fill="#39414d"/>
+
+    <!-- 视频 -->
+    <rect x="190" y="150" width="300" height="390" fill="url(#vid)"/>
+    <!-- 视频内标题浮层 -->
+    <rect x="206" y="470" width="150" height="34" rx="5" fill="#000" opacity=".45"/>
+    <rect x="216" y="479" width="96" height="7" rx="3" fill="#8e9aa8"/>
+    <rect x="216" y="491" width="62" height="6" rx="3" fill="#6b7684"/>
+
+    <!-- 右侧互动栏 -->
+    <rect x="490" y="150" width="70" height="390" fill="#14171d"/>
+    <circle cx="525" cy="196" r="15" fill="#39414d"/>
+    <circle cx="525" cy="252" r="12" fill="#39414d"/>
+    <circle cx="525" cy="300" r="12" fill="#39414d"/>
+    <circle cx="525" cy="348" r="12" fill="#39414d"/>
+    <circle cx="525" cy="396" r="12" fill="#39414d"/>
+
+    <!-- 标注 -->
+    <rect class="ghost" x="60" y="150" width="130" height="390" rx="4"/>
+    <rect class="ghost" x="490" y="150" width="70" height="390" rx="4"/>
+    <rect class="ghost" x="382" y="116" width="102" height="28" rx="4"/>
+    <rect class="ghost" x="202" y="466" width="158" height="42" rx="4"/>
+
+    <g>
+      <circle cx="76" cy="168" r="8" fill="#25f4ee"/><text class="t num" x="72.5" y="172">1</text>
+      <circle cx="506" cy="168" r="8" fill="#25f4ee"/><text class="t num" x="502.5" y="172">2</text>
+      <circle cx="398" cy="130" r="8" fill="#25f4ee"/><text class="t num" x="394.5" y="134">3</text>
+      <circle cx="218" cy="482" r="8" fill="#25f4ee"/><text class="t num" x="214.5" y="486">4</text>
+    </g>
+  </g>
+
+  <!-- ============ 右：净播 ============ -->
+  <rect class="panel" x="620" y="60" width="540" height="520" rx="14"/>
+  <text class="t h" x="644" y="92">抖音净播</text>
+  <text class="t sub" x="748" y="92">启用扩展后</text>
+
+  <g>
+    <rect class="chrome" x="640" y="110" width="500" height="40" rx="6"/>
+    <rect x="660" y="120" width="150" height="20" rx="10" fill="#252a33"/>
+    <text class="t dim" x="672" y="134">搜索你感兴趣的内容</text>
+
+    <!-- 只留头像 / 通知 / 消息 -->
+    <circle cx="1046" cy="130" r="8" fill="#2f3641"/>
+    <circle cx="1074" cy="130" r="8" fill="#2f3641"/>
+    <circle cx="1104" cy="130" r="11" fill="#3a424e"/>
+
+    <!-- 视频占满，无导航无互动栏 -->
+    <rect x="720" y="150" width="340" height="390" fill="url(#vid2)"/>
+
+    <!-- 原本被移除的位置：淡虚线示意 -->
+    <rect class="faint" x="640" y="150" width="80" height="390" rx="4"/>
+    <rect class="faint" x="1060" y="150" width="80" height="390" rx="4"/>
+    <text class="t dim" x="654" y="350" transform="rotate(-90 654 350)">已移除</text>
+    <text class="t dim" x="1096" y="350" transform="rotate(-90 1096 350)">已移除</text>
+  </g>
+
+  <!-- ============ 图例 ============ -->
+  <g class="t">
+    <circle cx="52" cy="608" r="8" fill="#25f4ee"/><text class="num" x="48.5" y="612">1</text>
+    <text class="sub" x="68" y="612">左侧导航</text>
+
+    <circle cx="152" cy="608" r="8" fill="#25f4ee"/><text class="num" x="148.5" y="612">2</text>
+    <text class="sub" x="168" y="612">右侧互动栏</text>
+
+    <circle cx="272" cy="608" r="8" fill="#25f4ee"/><text class="num" x="268.5" y="612">3</text>
+    <text class="sub" x="288" y="612">顶栏多余图标</text>
+
+    <circle cx="402" cy="608" r="8" fill="#25f4ee"/><text class="num" x="398.5" y="612">4</text>
+    <text class="sub" x="418" y="612">视频标题浮层</text>
+
+    <text class="tag" x="560" y="612">四处均可移除 · 视频区自动放大 · 直播与评论区照常可用</text>
+  </g>
+</svg>

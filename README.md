@@ -5,6 +5,8 @@
 ![manifest](https://img.shields.io/badge/Manifest-V3-4285F4)
 ![platform](https://img.shields.io/badge/Chrome-Desktop-34A853)
 
+![界面示意：左为默认界面，右为启用扩展后](docs/preview.svg)
+
 一个针对**网页版抖音**（`www.douyin.com`）的 Chrome 扩展：**自动最高清晰度**、**带货广告自动跳过**、**失焦暂停**、**纯净布局**。
 
 不轮询、不全站监听、不删 DOM 节点 —— 刷视频不卡。
@@ -86,6 +88,8 @@ js/overlay.js      视频浮层显隐
 js/filter.js       广告 / 带货过滤、直播小窗关闭
 js/header.js       顶栏图标精简
 js/main.js         启动、新视频检测、失焦暂停、调试
+docs/preview.svg   README 顶部的界面示意
+CHANGELOG.md       逐版本改动记录
 ```
 
 ## 已知限制
@@ -97,7 +101,7 @@ js/main.js         启动、新视频检测、失焦暂停、调试
 
 ## 更新日志
 
-见 [Releases](https://github.com/XLNC-L/douyin-clean/releases)。
+每个版本的详细改动见 [CHANGELOG.md](CHANGELOG.md)；可下载的安装包见 [Releases](https://github.com/XLNC-L/douyin-clean/releases)。
 
 ## License
 
