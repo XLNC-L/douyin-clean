@@ -1,4 +1,4 @@
-/* 抖音净播 v1.9.2
+/* 抖音净播 v1.9.3
  * 全部视觉改动都在这一份静态 CSS 里完成：进入页面后运行时零成本。
  * 所有规则都以 html.dyc-feed 为前提，只在"刷视频"页面生效。
  * html.dyc-ui-on 由 JS 按鼠标状态切换：进入视频画面或在画面上移动即显示，
@@ -125,12 +125,14 @@ html.dyc-feed.dyc-progress-on .dyc-progress-fill {
   background: var(--dyc-progress-color, #fe2c55);
 }
 
-/* 进度条跟视频信息一起显隐：dyc-ui-on 在时显示，静止 2 秒或移出画面后随浮层淡出。 */
+/* 进度条与视频信息"相对"显隐：
+ *   信息显示时（原生控制条自带进度）-> 隐藏自绘线条，避免重复；
+ *   信息收起后（原生控制条也收起）-> 显示自绘线条，保证画面上始终有进度指示。 */
 html.dyc-feed .dyc-progress {
   transition: opacity .18s ease;
 }
 
-html.dyc-feed:not(.dyc-ui-on) .dyc-progress {
+html.dyc-feed.dyc-ui-on .dyc-progress {
   opacity: 0 !important;
 }
 
