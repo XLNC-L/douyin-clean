@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 700" width="900" height="700" role="img" aria-label="抖音净播 设置面板示意：功能分项开关与左侧导航逐项保留">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 700" width="900" height="700" role="img" aria-label="抖音净播 设置面板示意：功能分项开关、进度条换色与左侧导航逐项保留">
   <title>抖音净播 · 设置面板示意</title>
-  <desc>设置面板包含自动最高清晰度、广告与带货过滤、失焦自动暂停的独立开关；左侧导航可选择整条隐藏、自定义保留或保持原样，自定义时可以只保留「我的」。</desc>
+  <desc>设置面板包含自动最高清晰度、广告与带货过滤、失焦自动暂停的独立开关；视频底部进度条可以开关并换色；左侧导航可选择整条隐藏、自定义保留或保持原样，自定义时可以只保留「我的」，AI 抖音入口始终隐藏。</desc>
 
   <defs>
     <style>
@@ -36,7 +36,7 @@
     <rect x="58" y="48" width="34" height="34" rx="9" fill="#25f4ee"/>
     <path d="M71 57 l11 8 -11 8 z" fill="#0e1116"/>
     <text class="t" x="104" y="67" font-size="16" font-weight="700" fill="#ffffff">抖音净播</text>
-    <text class="t" x="186" y="67" font-size="10" fill="#25f4ee">v1.6.1</text>
+    <text class="t" x="186" y="67" font-size="10" fill="#25f4ee">v1.9.0</text>
     <text class="t" x="104" y="86" font-size="9.5" fill="#9aa0aa">已连接当前抖音页面</text>
 
     <!-- 功能 -->
@@ -78,17 +78,13 @@
     <rect x="133" y="398" width="10" height="10" rx="2.5" class="cb"/>
     <text class="t chip" x="148" y="407">推荐</text>
 
-    <rect x="180" y="392" width="62" height="22" rx="11" class="chipbox"/>
+    <rect x="180" y="392" width="48" height="22" rx="11" class="chipbox"/>
     <rect x="187" y="398" width="10" height="10" rx="2.5" class="cb"/>
-    <text class="t chip" x="202" y="407">AI抖音</text>
+    <text class="t chip" x="202" y="407">关注</text>
 
-    <rect x="248" y="392" width="48" height="22" rx="11" class="chipbox"/>
-    <rect x="255" y="398" width="10" height="10" rx="2.5" class="cb"/>
-    <text class="t chip" x="270" y="407">关注</text>
-
-    <rect x="302" y="392" width="48" height="22" rx="11" class="chipbox"/>
-    <rect x="309" y="398" width="10" height="10" rx="2.5" class="cb"/>
-    <text class="t chip" x="324" y="407">朋友</text>
+    <rect x="234" y="392" width="48" height="22" rx="11" class="chipbox"/>
+    <rect x="241" y="398" width="10" height="10" rx="2.5" class="cb"/>
+    <text class="t chip" x="256" y="407">朋友</text>
 
     <!-- 第二排 chip，保留「我的」 -->
     <rect x="72" y="420" width="50" height="22" rx="11" fill="#fff0f3" stroke="#fe2c55"/>
@@ -112,7 +108,7 @@
     <rect x="315" y="426" width="10" height="10" rx="2.5" class="cb"/>
     <text class="t chip" x="330" y="435">小游戏</text>
 
-    <text class="t hint" x="72" y="474">未勾选的入口会被隐藏；一个都不勾选时整条导航隐藏。</text>
+    <text class="t hint" x="72" y="474">未勾选的入口会被隐藏；一个都不勾选时整条导航隐藏；AI 抖音始终隐藏。</text>
 
     <!-- 其他布局 -->
     <text class="t label" x="60" y="530">布局精简 · 其他</text>
@@ -131,7 +127,7 @@
     <line x1="60" y1="630" x2="400" y2="630" stroke="#ececf1"/>
     <rect x="60" y="640" width="66" height="24" rx="7" fill="#ffffff" stroke="#ececf1"/>
     <text class="t" x="93" y="656" font-size="10.5" fill="#161823" text-anchor="middle">恢复默认</text>
-    <text class="t small" x="388" y="656" text-anchor="end">Alt + Shift + D 调试</text>
+    <text class="t small" x="388" y="656" text-anchor="end">设置即时生效</text>
   </g>
   <rect x="40.5" y="30.5" width="379" height="639" rx="14" fill="none" stroke="#2b313b"/>
 
@@ -139,7 +135,7 @@
   <text class="t h1" x="470" y="92">设置面板</text>
   <text class="t body" x="470" y="120">点工具栏图标打开，改动即时生效</text>
   <rect x="470" y="136" width="56" height="3" fill="#fe2c55"/>
-  <text class="t tag" x="860" y="60" text-anchor="end">v1.6.1</text>
+  <text class="t tag" x="860" y="60" text-anchor="end">v1.9.0</text>
 
   <circle cx="486" cy="180" r="10" fill="#25f4ee"/>
   <text class="t num" x="486" y="184" text-anchor="middle">1</text>

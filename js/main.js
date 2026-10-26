@@ -32,6 +32,7 @@
   function teardown() {
     html.classList.remove('dyc-ui-on');
     D.overlay.reset();
+    D.progress.reset();
     D.filter.reset();
     D.quality.reset();
     D.header.reset();
@@ -55,6 +56,7 @@
     if (v) {
       lastVideo = v;
       D.overlay.sync(v);
+      D.progress.attach(v);
     }
     retries = 0;
   }
@@ -140,6 +142,7 @@
     lastVideo = v;
     lastSrc = srcOf(v);
     D.overlay.sync(v);
+    D.progress.attach(v);
     D.filter.checkAd(v);
     D.quality.schedule(v);
   }
@@ -220,6 +223,7 @@
       导航已隐藏: !!document.getElementById('douyin-navigation') &&
         getComputedStyle(document.getElementById('douyin-navigation')).display === 'none',
       浮层已标记: document.querySelectorAll('[data-dyc-ui]').length,
+      进度条: D.progress.probe(),
       清晰度: D.quality.probe(),
       广告判定: D.filter.probe(),
       顶栏隐藏项: document.querySelectorAll('[data-dyc-hide]').length

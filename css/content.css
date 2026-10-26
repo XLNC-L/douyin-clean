@@ -1,4 +1,4 @@
-/* 抖音净播 v1.8.0
+/* 抖音净播 v1.9.0
  * 全部视觉改动都在这一份静态 CSS 里完成：进入页面后运行时零成本。
  * 所有规则都以 html.dyc-feed 为前提，只在"刷视频"页面生效。
  * html.dyc-ui-on 由 JS 按鼠标状态切换：进入视频画面或在画面上移动即显示，
@@ -15,6 +15,12 @@ html.dyc-feed.dyc-nav-hidden #douyin-navigation {
 
 /* 逐项保留：JS 只给"要隐藏的入口行"打标记，保留项（例如「我的」）不受影响 */
 html.dyc-feed #douyin-navigation [data-dyc-nav-hide] {
+  display: none !important;
+}
+
+/* 「AI 抖音」入口无条件隐藏：不参与逐项保留，三种导航模式下都不显示。
+ * 用独立属性，避免 clearMarks() 清理逐项标记时把它一起摘掉。 */
+html.dyc-feed #douyin-navigation [data-dyc-nav-force] {
   display: none !important;
 }
 
@@ -94,6 +100,41 @@ html.dyc-feed [class*="playclarity-setting"].dyc-open * {
   pointer-events: auto !important;
 }
 
-/* ========== 5. 直播 / 广告 ========== */
+/* ========== 5. 视频底部进度细线 ========== */
+/* 线条挂在播放器根节点（.xgplayer / .douyin-player）里贴底，随播放器缩放、开评论、全屏自动对齐。
+ * 默认不显示，只有 html.dyc-progress-on 时才出现；直播 / 时长未知时由 JS 打 data-dyc-unknown 隐藏。
+ * 填充部分由 progress.js 逐帧写 transform: scaleX()（合成层，不触发重排）。 */
+html.dyc-feed.dyc-progress-on .dyc-progress {
+  display: block;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  z-index: 2147482000;
+  pointer-events: none;
+  background: rgba(255, 255, 255, .16);
+  box-shadow: 0 0 6px rgba(0, 0, 0, .22);
+}
+
+html.dyc-feed.dyc-progress-on .dyc-progress-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+  background: var(--dyc-progress-color, #fe2c55);
+}
+
+/* 直播 / MSE 流拿不到 duration：整条隐藏，而不是一直停在 0 */
+html.dyc-feed.dyc-progress-on .dyc-progress[data-dyc-unknown] {
+  display: none;
+}
+
+/* 没有 requestVideoFrameCallback 时的兜底：用线性过渡补上 timeupdate 之间的跳动 */
+html.dyc-feed.dyc-progress-on .dyc-progress[data-dyc-smooth] .dyc-progress-fill {
+  transition: transform .25s linear;
+}
+
+/* ========== 6. 直播 / 广告 ========== */
 /* 不在这里做视觉处理：命中后由 JS 直接切下一条。
  * 删除卡片节点会破坏抖音的滚动吸附与虚拟列表，那才是刷视频卡顿的根源。 */

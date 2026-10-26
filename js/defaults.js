@@ -9,6 +9,8 @@
     live: true,             // 推荐流中的直播间自动跳过
     pause: true,            // 失焦自动暂停
     overlay: true,          // 标题 / 互动栏自动隐藏
+    progress: true,         // 视频底部进度细线
+    progressColor: '#fe2c55', // 进度细线颜色（6 位 hex）
     header: {
       mode: 'simple',       // simple=默认精简（头像/通知/消息）| custom=自定义保留 | off=保持原样
       keep: ['通知', '消息'] // custom 模式下要保留的图标文案
@@ -42,12 +44,20 @@
         .slice(0, 20)
       : DEFAULTS.header.keep.slice();
 
+    // 颜色只接受 6 位 hex，避免把任意字符串写进 CSS 变量
+    const rawColor = typeof r.progressColor === 'string' ? r.progressColor.trim().toLowerCase() : '';
+    const progressColor = /^#[0-9a-f]{6}$/.test(rawColor)
+      ? rawColor
+      : DEFAULTS.progressColor;
+
     return {
       quality: r.quality !== false,
       filter: r.filter !== false,
       live: r.live !== false,
       pause: r.pause !== false,
       overlay: r.overlay !== false,
+      progress: r.progress !== false,
+      progressColor,
       header: { mode: headerMode, keep: headerKeep },
       nav: { mode, keep }
     };

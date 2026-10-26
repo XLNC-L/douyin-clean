@@ -37,6 +37,7 @@
     if (D.nav) D.nav.apply();
     if (D.header) D.header.applySettings();
     if (D.overlay) D.overlay.applySettings();
+    if (D.progress) D.progress.applySettings();
     if (D.quality) D.quality.applySettings();
     if (D.filter) D.filter.applySettings();
   }

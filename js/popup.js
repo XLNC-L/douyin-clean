@@ -40,10 +40,22 @@
     $$('input[name="headerMode"]').forEach(el => {
       el.checked = el.value === settings.header.mode;
     });
+    $('#progressStyle').hidden = !settings.progress;
+    renderColor();
     $('#navCustom').hidden = settings.nav.mode !== 'custom';
     $('#headerCustom').hidden = settings.header.mode !== 'custom';
     renderNav();
     renderHeader();
+  }
+
+  function renderColor() {
+    const color = settings.progressColor;
+    const input = $('#progressColor');
+    if (input && input.value.toLowerCase() !== color) input.value = color;
+    $('#progressHex').textContent = color.toUpperCase();
+    $$('#colorPresets .swatch').forEach(el => {
+      el.setAttribute('aria-pressed', el.dataset.color === color ? 'true' : 'false');
+    });
   }
 
   function renderNav() {
@@ -79,7 +91,7 @@
       chip.append(cb, text);
       list.append(chip);
     }
-    hint.textContent = '未勾选的入口会被隐藏，改动即时生效；一个都不勾选时整条导航隐藏。';
+    hint.textContent = '未勾选的入口会被隐藏，改动即时生效；一个都不勾选时整条导航隐藏。「AI 抖音」入口始终隐藏。';
   }
 
   function renderHeader() {
@@ -138,6 +150,28 @@
     $$('input[data-key]').forEach(el => {
       el.addEventListener('change', () => {
         settings[el.dataset.key] = el.checked;
+        // 进度条开关会带出 / 收起颜色设置块
+        if (el.dataset.key === 'progress') render();
+        save();
+      });
+    });
+
+    const colorInput = $('#progressColor');
+    colorInput.addEventListener('input', () => {
+      // 拖动取色器时只更新预览，避免高频写 chrome.storage
+      settings.progressColor = colorInput.value.toLowerCase();
+      renderColor();
+    });
+    colorInput.addEventListener('change', () => {
+      settings.progressColor = colorInput.value.toLowerCase();
+      renderColor();
+      save();
+    });
+
+    $$('#colorPresets .swatch').forEach(el => {
+      el.addEventListener('click', () => {
+        settings.progressColor = el.dataset.color;
+        renderColor();
         save();
       });
     });
