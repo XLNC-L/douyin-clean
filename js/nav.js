@@ -27,6 +27,10 @@
   const LINK_SEL = 'a, [role="link"]';
   const TAB_RE = /(^|\s)tab-[A-Za-z0-9_-]+(\s|$)/;
   const HIDE_ATTR = 'data-dyc-nav-hide';
+  // 「AI 抖音」入口：不跟导航模式走，任何模式下都强制隐藏。
+  // clean() 已经压掉空格，所以 "AI 抖音" / "AI抖音" 都会归一成 "AI抖音"。
+  const FORCE_ATTR = 'data-dyc-nav-force';
+  const FORCE_RE = /^ai抖音$/i;
 
   let mo = null;
   let raf = 0;
@@ -97,11 +101,42 @@
     document.querySelectorAll('[' + HIDE_ATTR + ']').forEach(el => el.removeAttribute(HIDE_ATTR));
   }
 
+  function clearForced() {
+    document.querySelectorAll('[' + FORCE_ATTR + ']').forEach(el => el.removeAttribute(FORCE_ATTR));
+  }
+
+  const isForced = label => FORCE_RE.test(String(label || ''));
+
+  // 优先隐藏整行（连行间距一起收掉）；结构变动、没有 tab-* 包裹时按文案兜底。
+  function hideForced() {
+    const nav = navOf();
+    if (!nav) return;
+
+    for (const it of rows()) {
+      if (isForced(it.label)) it.row.setAttribute(FORCE_ATTR, '');
+    }
+
+    let n = 0;
+    for (const el of nav.querySelectorAll(LINK_SEL)) {
+      if (++n > 60) break;
+      if (!isForced(labelOf(el))) continue;
+      let node = el.parentElement;
+      let best = el;
+      for (let i = 0; i < 5 && node && node !== nav; i++, node = node.parentElement) {
+        const r = node.getBoundingClientRect();
+        if (r.width > 0 && r.width < 260 && r.height < 80) best = node;
+        else break;
+      }
+      best.setAttribute(FORCE_ATTR, '');
+    }
+  }
+
   function hideItems() {
     const nav = navOf();
     if (!nav || D.settings.nav.mode !== 'custom' || fullHidden()) return;
 
-    const keep = new Set(D.settings.nav.keep || []);
+    // AI 抖音这类强制隐藏项不允许被"保留"，否则会留下一条空行
+    const keep = new Set((D.settings.nav.keep || []).filter(l => !isForced(l)));
     const list = rows();
     if (!list.length) return;
 
@@ -152,14 +187,17 @@
 
   function watch() {
     if (mo) { mo.disconnect(); mo = null; }
-    if (!D.settings || D.settings.nav.mode !== 'custom' || fullHidden()) return;
+    // 整条隐藏时没必要观察；custom 与 off 模式都要盯着导航重渲染，
+    // 前者维持逐项保留，后者只维持「AI 抖音」的强制隐藏。
+    if (!D.settings || fullHidden()) return;
     const nav = navOf();
     if (!nav) return;
     mo = new MutationObserver(() => {
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
-        hideItems();
+        if (D.settings.nav.mode === 'custom' && !fullHidden()) hideItems();
+        hideForced();
       });
     });
     // 只观察导航容器的子节点变化；我们只改属性，不会触发自己
@@ -171,7 +209,7 @@
     retries++;
     retryTimer = setTimeout(() => {
       retryTimer = 0;
-      if (D.settings.nav.mode !== 'custom' || fullHidden()) return;
+      if (fullHidden()) return;
       if (navOf()) apply();
       else retryLater();
     }, 1000);
@@ -182,25 +220,28 @@
       const nav = navOf();
       if (!document.documentElement.classList.contains('dyc-feed')) {
         clearMarks();
+        clearForced();
         return;
       }
       const hidden = fullHidden();
       document.documentElement.classList.toggle('dyc-nav-hidden', hidden);
       clearMarks();
+      hideForced();
 
-      if (nav && D.settings.nav.mode === 'custom' && !hidden) {
+      if (nav) {
         retries = 0;
-        hideItems();
-      } else if (!nav && D.settings.nav.mode === 'custom' && !hidden) {
+        if (D.settings.nav.mode === 'custom' && !hidden) hideItems();
+      } else if (!hidden) {
         retryLater();
       }
       watch();
       D.log('nav: 模式=' + D.settings.nav.mode,
-        '保留=' + ((D.settings.nav.keep || []).join('/') || '无'));
+        '保留=' + ((D.settings.nav.keep || []).join('/') || '无'),
+        'AI抖音=强制隐藏');
     },
 
     labels() {
-      return rows().map(it => it.label);
+      return rows().map(it => it.label).filter(l => !isForced(l));
     },
 
     reset() {
@@ -209,6 +250,7 @@
       retryTimer = 0;
       retries = 0;
       clearMarks();
+      clearForced();
       document.documentElement.classList.remove('dyc-nav-hidden');
     }
   };

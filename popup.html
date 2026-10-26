@@ -49,6 +49,35 @@
     </section>
 
     <section class="card">
+      <h2>播放进度条</h2>
+      <label class="row">
+        <span class="row-main">
+          <span class="row-title">底部进度细线</span>
+          <span class="row-desc">视频底边常驻一条细线，显示播放进度；直播不显示</span>
+        </span>
+        <input class="switch" type="checkbox" data-key="progress">
+      </label>
+      <div id="progressStyle" class="nav-custom" hidden>
+        <div class="nav-head">
+          <span>线条颜色</span>
+          <span id="progressHex" class="hex">#FE2C55</span>
+        </div>
+        <div class="color-line">
+          <input id="progressColor" class="color-input" type="color" value="#fe2c55" aria-label="进度条颜色">
+          <div id="colorPresets" class="presets">
+            <button class="swatch" type="button" data-color="#fe2c55" style="--sw:#fe2c55" title="抖音红" aria-label="抖音红"></button>
+            <button class="swatch" type="button" data-color="#25f4ee" style="--sw:#25f4ee" title="青色" aria-label="青色"></button>
+            <button class="swatch" type="button" data-color="#00e676" style="--sw:#00e676" title="绿色" aria-label="绿色"></button>
+            <button class="swatch" type="button" data-color="#ffd400" style="--sw:#ffd400" title="黄色" aria-label="黄色"></button>
+            <button class="swatch" type="button" data-color="#a855f7" style="--sw:#a855f7" title="紫色" aria-label="紫色"></button>
+            <button class="swatch" type="button" data-color="#ffffff" style="--sw:#ffffff" title="白色" aria-label="白色"></button>
+          </div>
+        </div>
+        <p class="hint">改动即时生效；也可以点左侧色块用取色器选任意颜色。</p>
+      </div>
+    </section>
+
+    <section class="card">
       <h2>布局精简 · 左侧导航</h2>
       <div class="seg" role="radiogroup" aria-label="左侧导航模式">
         <label><input type="radio" name="navMode" value="hide"><span>整条隐藏</span></label>

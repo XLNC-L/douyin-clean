@@ -255,6 +255,65 @@ h2 {
   background: rgba(254, 44, 85, .06);
 }
 
+/* 进度条颜色 */
+.hex {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: .3px;
+  color: var(--muted);
+}
+
+.color-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.color-input {
+  width: 44px;
+  height: 30px;
+  padding: 0;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.color-input::-webkit-color-swatch-wrapper { padding: 2px; }
+.color-input::-webkit-color-swatch {
+  border: 0;
+  border-radius: 6px;
+}
+
+.presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid rgba(18, 18, 24, .12);
+  border-radius: 50%;
+  background: var(--sw);
+  cursor: pointer;
+  transition: box-shadow .15s, transform .15s;
+}
+
+.swatch:hover { transform: scale(1.12); }
+
+.swatch[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--sw);
+}
+
+.swatch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(254, 44, 85, .5);
+}
+
 .hint {
   margin: 8px 0 0;
   font-size: 11px;

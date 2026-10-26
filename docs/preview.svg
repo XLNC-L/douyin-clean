@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" width="1200" height="640" role="img" aria-label="抖音净播 界面示意：默认界面与净播界面对比">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" width="1200" height="640" role="img" aria-label="抖音净播 界面示意：默认界面与净播界面对比，净播界面底部带进度细线">
   <title>抖音净播 · 界面示意</title>
-  <desc>左为网页版抖音默认界面，右侧为启用扩展后的界面：左侧导航、右侧互动栏、顶栏多余图标、视频标题浮层均已移除。</desc>
+  <desc>左为网页版抖音默认界面，右侧为启用扩展后的界面：左侧导航、右侧互动栏、顶栏多余图标、视频标题浮层均已移除，视频底部新增一条进度细线。</desc>
 
   <defs>
     <linearGradient id="vid" x1="0" y1="0" x2="1" y2="1">
@@ -109,6 +109,9 @@
 
     <!-- 视频占满，无导航无互动栏 -->
     <rect x="720" y="150" width="340" height="390" fill="url(#vid2)"/>
+    <!-- 视频底部进度细线 -->
+    <rect x="720" y="536" width="340" height="4" fill="#ffffff" opacity=".16"/>
+    <rect x="720" y="536" width="206" height="4" fill="#fe2c55"/>
 
     <!-- 原本被移除的位置：淡虚线示意 -->
     <rect class="faint" x="640" y="150" width="80" height="390" rx="4"/>
@@ -131,6 +134,6 @@
     <circle cx="402" cy="608" r="8" fill="#25f4ee"/><text class="num" x="398.5" y="612">4</text>
     <text class="sub" x="418" y="612">视频标题浮层</text>
 
-    <text class="tag" x="560" y="612">四处均可移除 · 视频区自动放大 · 直播与评论区照常可用</text>
+    <text class="tag" x="560" y="612">四处均可移除 · 视频区自动放大 · 底部新增进度细线</text>
   </g>
 </svg>
