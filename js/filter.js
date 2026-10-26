@@ -41,6 +41,18 @@
   // 价格、购买按钮文案只作为兜底，避免只认"购物"两个字而漏判。
   const PRICE_RE = /^[¥￥]\s?\d/;
   const SHOP_CTA_RE = /(查看详情|立即购买|去购买|马上抢|加入购物车|领券购买)/;
+
+  // 直播卡片与普通视频的区别（2026-10 实测）：
+  //   · 播放器容器类名带 LivePlayer_（普通视频是 xgplayer）；
+  //   · 控制条里的 .time-live-tag 在普通视频是 display:none，直播时显示「直播」；
+  //   · 直播卡片 / 房间会带 data-e2e="live-room-*" / "livecard-*" / "web_live" 等语义标记；
+  //   · 卡片链接指向 live.douyin.com 或 /live/。
+  // 注意：每个头像都带 data-e2e="live-avatar"，绝不能按 data-e2e*="live" 通配。
+  const LIVE_BADGE_RE = /^(直播中|直播|LIVE|进入直播间)$/i;
+  const LIVE_LINK_SEL = 'a[href*="live.douyin.com"], a[href*="/live/"]';
+  const LIVE_MARK_SEL = '[data-e2e*="live-room"], [data-e2e*="livecard"], [data-e2e*="web_live"], [data-e2e*="live-enter-room"], [class*="LivePlayer_"], [class*="webcast-chatroom"]';
+  const MAX_LIVE_STREAK = 5;     // 连续跳过这么多条直播后先停一下，避免推荐流全是直播时无限切
+  let liveStreak = 0;
   // 抖音复用同一个 <video> 元素播放所有视频，判定状态不能挂在元素上：
   // 元素上的计数一旦用满、或已判成广告，后面所有视频都会被直接放过。
   // 也不能用 duration / currentSrc 当身份：抖音大量视频是 MSE 流，
@@ -53,6 +65,16 @@
   function cardOf(video) {
     return video.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"], .slider-video') ||
       video.parentElement || document.body;
+  }
+
+  const liveEnabled = () => !D.settings || D.settings.live !== false;
+
+  function visibleBox(el) {
+    if (!el || !el.getBoundingClientRect) return false;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return false;
+    const cs = getComputedStyle(el);
+    return cs.display !== 'none' && cs.visibility !== 'hidden';
   }
 
   // 卡片内的文字扫描：一次遍历同时判"广告徽标"和"购物卡片"
@@ -157,6 +179,61 @@
     return hit;
   }
 
+  // 直播判定：同时看"视频卡片"和"播放器容器"两层。
+  // 卡片里有链接 / livecard / live-room 标记；播放器容器本身可能就带 LivePlayer_ 类，
+  // 只查卡片会漏掉（直播间的 cardOf 往往只是 video 的父层）。
+  function liveHit(video) {
+    if (!liveEnabled()) return '';
+    // 优先用整张活动卡（包含播放器之外的徽标 / 链接层），没有时退回 cardOf
+    const card = video.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"]') || cardOf(video);
+    const player = video.closest('.xgplayer, .douyin-player, [class*="LivePlayer_"]');
+    const scopes = Array.from(new Set([card, player].filter(Boolean)));
+
+    // 1) 卡片链接直接指向直播间
+    for (const scope of scopes) {
+      const link = scope.querySelector(LIVE_LINK_SEL);
+      if (link && visibleBox(link)) return '直播间链接';
+    }
+
+    // 2) 播放器 / 直播房间的语义标记（排除 hidden 的预创建播放器）
+    for (const scope of scopes) {
+      if (scope.matches && scope.matches(LIVE_MARK_SEL) && visibleBox(scope)) return '直播间标记';
+      let n = 0;
+      for (const el of scope.querySelectorAll(LIVE_MARK_SEL)) {
+        if (++n > 8) break;
+        if (el.closest(COMMENT_PANEL_SEL)) continue;
+        if (!visibleBox(el)) continue;
+        return '直播间标记';
+      }
+    }
+
+    // 3) 控制条把总时长换成了「直播」标签（普通视频这个标签是 display:none）
+    for (const scope of scopes) {
+      const liveTag = scope.querySelector('.time-live-tag');
+      if (liveTag && visibleBox(liveTag)) return '直播时间标签';
+    }
+
+    // 4) 小尺寸徽标文字：排除标题 / 话题 / 评论，避免把文案里的"直播"当成直播
+    const vr = video.getBoundingClientRect();
+    for (const scope of scopes) {
+      const w = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = w.nextNode())) {
+        const t = (node.nodeValue || '').replace(/\s+/g, '').trim();
+        if (!t || t.length > 8 || !LIVE_BADGE_RE.test(t)) continue;
+        const el = node.parentElement;
+        if (!el || el.closest(COMMENT_PANEL_SEL)) continue;
+        if (el.closest('.video-info-detail, [data-e2e*="video-info"]')) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width < 6 || r.height < 6 || r.width > 160 || r.height > 48) continue;
+        if (vr.width && !D.near(r, vr, 40)) continue;
+        return '直播徽标';
+      }
+    }
+
+    return '';
+  }
+
   // 切下一条。三种手段按顺序兜底，并且**复核是否真的切走了**：
   // 抖音的"下一条"箭头有时点不动（不可见 / 事件被拦），以前点完就当成功了，
   // blocked 一置真就再也不试，于是那条带货视频会一直播下去。
@@ -202,7 +279,7 @@
 
   function judge(video) {
     if (!(video instanceof HTMLVideoElement)) return;
-    if (!enabled()) return;
+    if (!enabled() && !liveEnabled()) return;
     if (!document.documentElement.classList.contains('dyc-feed')) return;
     if (!video.isConnected) return;
 
@@ -224,10 +301,13 @@
     if (st.passes >= 5) return;         // 最多判 5 次：购物卡片有时比视频晚出现
     st.passes++;
 
-    const reason = detect(video);
+    // 广告和直播是两个独立开关，谁开着就查谁
+    let reason = enabled() ? detect(video) : '';
+    if (!reason && liveEnabled()) reason = liveHit(video);
     D.log('filter: 检查', reason || '未命中');
 
     if (!reason) {
+      liveStreak = 0;                   // 回到正常视频，连续直播计数清零
       if (st.passes < 5) setTimeout(() => judge(video), st.passes === 1 ? 900 : 1600);
       return;
     }
@@ -235,6 +315,13 @@
     if (!st.blocked) {
       st.blocked = true;
       D.log('filter: 识别到', reason, '，跳过该视频');
+      if (liveStreak >= MAX_LIVE_STREAK) {
+        liveStreak = 0;
+        D.log('filter: 连续直播过多，暂停本次过滤');
+        return;
+      }
+      if (reason.indexOf('直播') !== -1) liveStreak++;
+      else liveStreak = 0;
       next(video);
     }
   }
@@ -355,7 +442,7 @@
     },
     closePopups,
     applySettings() {
-      if (!enabled()) {
+      if (!enabled() && !liveEnabled()) {
         this.reset();
         return;
       }
@@ -367,6 +454,7 @@
       if (!v) return null;
       return {
         hit: detect(v) || null,
+        live: liveEnabled() ? (liveHit(v) || null) : null,
         gen: D.gen,
         passes: st.passes,
         muted: v.muted,
@@ -377,6 +465,7 @@
       st = { gen: -1, passes: 0, blocked: false, last: 0 };
       lastSkip = 0;
       lastScan = 0;
+      liveStreak = 0;
     }
   };
 })();

@@ -28,9 +28,16 @@
       <label class="row">
         <span class="row-main">
           <span class="row-title">广告 / 带货过滤</span>
-          <span class="row-desc">识别商品卡与店铺账号并切下一条，直播不跳过</span>
+          <span class="row-desc">识别商品卡与店铺账号并切下一条</span>
         </span>
         <input class="switch" type="checkbox" data-key="filter">
+      </label>
+      <label class="row">
+        <span class="row-main">
+          <span class="row-title">直播过滤</span>
+          <span class="row-desc">推荐流里的直播间自动切到下一条，可关闭</span>
+        </span>
+        <input class="switch" type="checkbox" data-key="live">
       </label>
       <label class="row">
         <span class="row-main">
@@ -90,7 +97,6 @@
 
   <footer class="foot">
     <button id="reset" class="ghost" type="button">恢复默认</button>
-    <span class="hint">Alt + Shift + D 调试</span>
   </footer>
 
   <div id="toast" class="toast" hidden>已保存</div>

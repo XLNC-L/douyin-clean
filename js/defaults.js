@@ -6,6 +6,7 @@
   const DEFAULTS = {
     quality: true,          // 自动最高清晰度
     filter: true,           // 广告 / 带货过滤 + 直播小窗清理
+    live: true,             // 推荐流中的直播间自动跳过
     pause: true,            // 失焦自动暂停
     overlay: true,          // 标题 / 互动栏自动隐藏
     header: {
@@ -44,6 +45,7 @@
     return {
       quality: r.quality !== false,
       filter: r.filter !== false,
+      live: r.live !== false,
       pause: r.pause !== false,
       overlay: r.overlay !== false,
       header: { mode: headerMode, keep: headerKeep },
