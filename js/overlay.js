@@ -43,10 +43,17 @@
     if (!enabled()) {
       clearTimeout(timer);
       timer = 0;
-      if (!html.classList.contains('dyc-ui-on')) html.classList.add('dyc-ui-on');
+      if (!html.classList.contains('dyc-ui-on')) {
+        html.classList.add('dyc-ui-on');
+        // 从隐藏切到显示时补挂一次进度条，避免暂停期间被播放器清掉后要等看门狗
+        if (D.progress) D.progress.sync(D.playingVideo());
+      }
       return;
     }
-    if (!html.classList.contains('dyc-ui-on')) html.classList.add('dyc-ui-on');
+    if (!html.classList.contains('dyc-ui-on')) {
+      html.classList.add('dyc-ui-on');
+      if (D.progress) D.progress.sync(D.playingVideo());
+    }
     arm();
   }
 

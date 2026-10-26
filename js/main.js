@@ -178,6 +178,8 @@
     if (v) {
       const sig = v.paused ? '' : videoSig(v);
       if (v !== lastVideo || (sig && sig !== lastSig)) onNewVideo(v);
+      // 播放器重渲染 / 暂停期间可能把自绘进度条清掉；这里只做幂等补挂，没有就重建
+      if (D.progress) D.progress.sync(v);
     }
     D.filter.closePopups(v);        // 顺手关掉头像旁的直播/推广小窗
   }, 2000);
