@@ -1,4 +1,4 @@
-/* 抖音净播 v1.3.2
+/* 抖音净播 v1.6.0
  * 全部视觉改动都在这一份静态 CSS 里完成：进入页面后运行时零成本。
  * 所有规则都以 html.dyc-feed 为前提，只在"刷视频"页面生效。
  * html.dyc-ui-on 由 JS 按鼠标状态切换：进入视频画面或在画面上移动即显示，
@@ -58,10 +58,12 @@ html.dyc-feed [data-dyc-hide] {
 /* 抖音的档位列表只在真实鼠标悬停时才显示，合成事件打不开。
  * 因此脚本先给组件加 .dyc-open：整条链强制 display/visibility/pointer-events，
  * 保证每个档位都有真实的屏幕坐标（否则 getBoundingClientRect 全为 0，点不到），
- * 同时把透明度压到 0.01（肉眼不可见），点完立即移除。 */
-html.dyc-feed .xgplayer-playclarity-setting.dyc-open,
-html.dyc-feed .xgplayer-playclarity-setting.dyc-open .gear,
-html.dyc-feed .xgplayer-playclarity-setting.dyc-open .virtual {
+ * 同时把透明度压到 0.01（肉眼不可见），点完立即移除。
+ * 新版组件类名是 douyin-player-playclarity-setting，旧版是 xgplayer-playclarity-setting，
+ * 两者都以 playclarity-setting 结尾，用属性选择器一并覆盖。 */
+html.dyc-feed [class*="playclarity-setting"].dyc-open,
+html.dyc-feed [class*="playclarity-setting"].dyc-open .gear,
+html.dyc-feed [class*="playclarity-setting"].dyc-open .virtual {
   display: block !important;
   visibility: visible !important;
   pointer-events: auto !important;
@@ -72,7 +74,7 @@ html.dyc-feed .xgplayer-playclarity-setting.dyc-open .virtual {
   z-index: 2147483000 !important;
 }
 
-html.dyc-feed .xgplayer-playclarity-setting.dyc-open * {
+html.dyc-feed [class*="playclarity-setting"].dyc-open * {
   visibility: visible !important;
   pointer-events: auto !important;
 }

@@ -11,8 +11,14 @@
   'use strict';
 
   const D = (window.__DYC = {
-    VER: '1.3.9',
+    VER: '1.6.0',
     debug: false,
+
+    // 视频代次：每换一条视频 +1。
+    // 抖音大量视频的 duration 是 Infinity、currentSrc 是空串（MSE 流），
+    // 用它们当"视频身份"会全部撞成一个 key，导致过滤/清晰度只对第一条生效。
+    // 所以统一用这个由 main.js 在"新视频事件"里递增的代次当身份。
+    gen: 0,
 
     // 浮层静止 / 移出视频画面后多久自动隐藏（毫秒）
     HIDE_DELAY: 2000,
@@ -35,7 +41,7 @@
       commentIcon: '[data-e2e="feed-comment-icon"]',
       collect: '[data-e2e="video-player-collect"]',
       share: '[data-e2e="video-player-share"]',
-      qualityBtn: '.xgplayer-playclarity-setting, .xgplayer-quality-selector, [class*="clarity-setting"], [class*="quality-selector"]',
+      qualityBtn: '.xgplayer-playclarity-setting, .douyin-player-playclarity-setting, .xgplayer-quality-selector, [class*="clarity-setting"], [class*="quality-selector"]',
       qualityItem: '.xgplayer-quality-item, [class*="quality-item"], [class*="clarity-item"], [class*="playclarity-item"]',
       nextArrow: '[data-e2e="video-switch-next-arrow"]',
       badge: '[data-e2e*="badge"], [class*="badge"], [class*="Badge"]'

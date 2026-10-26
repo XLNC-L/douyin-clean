@@ -29,16 +29,21 @@
   // 必须带图标才算，避免把"购物分享"这种普通文案误判成带货。
   const SHOP_CHIP_RE = /^(购物|商品|小店|橱窗|去购买|立即购买|商品详情|同款商品)([／/｜|·:：]|$)/;
   const SHOP_NAME_RE = /(旗舰店|专卖店|专营店|官方店|企业店|小店)$/;
+  // 抖音的商品卡不止一种样式，文案也不统一：
+  //   ① "购物 | 视频同款×××"
+  //   ② "不容错过的优品 / ××× / ¥28.9 / 查看详情"
+  // 所以主判据用容器类名（xgplayer-shop-anchor / douyin-player-shop-anchor，两种播放器通用），
+  // 价格、购买按钮文案只作为兜底，避免只认"购物"两个字而漏判。
+  const PRICE_RE = /^[¥￥]\s?\d/;
+  const SHOP_CTA_RE = /(查看详情|立即购买|去购买|马上抢|加入购物车|领券购买)/;
   // 抖音复用同一个 <video> 元素播放所有视频，判定状态不能挂在元素上：
   // 元素上的计数一旦用满、或已判成广告，后面所有视频都会被直接放过。
-  // 状态改成跟着"当前这条视频"走，用时长（换清晰度不会变）作为身份。
-  let st = { key: '', passes: 0, blocked: false, last: 0 };
+  // 也不能用 duration / currentSrc 当身份：抖音大量视频是 MSE 流，
+  // duration 常为 Infinity、currentSrc 常为空串，所有这类视频会撞成同一个 key，
+  // 判定次数攒满后整条推荐流都不再检查（历史 bug，表现为"广告从不跳"）。
+  // 现在统一用 main.js 维护的代次 D.gen：每换一条视频 +1。
+  let st = { gen: -1, passes: 0, blocked: false, last: 0 };
   let lastSkip = 0;
-
-  function videoKey(v) {
-    const d = v.duration || 0;
-    return d > 0 ? 'd' + Math.round(d * 100) : 's' + (v.currentSrc || v.src || '').slice(-40);
-  }
 
   function cardOf(video) {
     return video.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"], .slider-video') ||
@@ -66,14 +71,24 @@
         return t;
       }
 
-      // ② 购物卡片
+      // ② 购物卡片：文案以"购物/商品"开头
+      if (!chip && (SHOP_CHIP_RE.test(t) || (/^(购物|商品)/.test(t) && el.querySelector('img, svg, i')))) {
+        const r = el.getBoundingClientRect();
+        if (r.width >= 6 && r.height >= 6 && r.width <= 320 && r.height <= 64 &&
+            (!vr || D.near(r, vr, 40))) {
+          chip = '购物卡片';
+          continue;
+        }
+      }
+
+      // ③ 商品卡兜底：另一种样式没有"购物"二字，靠价格 / 购买按钮识别
       if (chip) continue;
-      if (!SHOP_CHIP_RE.test(t) && !(/^(购物|商品)/.test(t) && el.querySelector('img, svg, i'))) continue;
-      const r = el.getBoundingClientRect();
-      if (r.width < 6 || r.height < 6) continue;
-      if (r.width > 320 || r.height > 64) continue;
-      if (vr && !D.near(r, vr, 40)) continue;
-      chip = '购物卡片';
+      if (!PRICE_RE.test(t) && !SHOP_CTA_RE.test(t)) continue;
+      const rc = el.getBoundingClientRect();
+      if (rc.width < 6 || rc.height < 6) continue;
+      if (rc.width > 320 || rc.height > 80) continue;
+      if (vr && !D.near(rc, vr, 40)) continue;
+      chip = '商品卡';
     }
     return chip;
   }
@@ -82,6 +97,20 @@
     if (!root || !root.querySelectorAll) return '';
     const el = root.querySelector('[data-e2e*="advert" i], [aria-label="广告"], img[alt="广告"], img[alt*="购物"], img[alt*="商品"], [aria-label*="购物"]');
     return el ? 'ad' : '';
+  }
+
+  // 商品卡容器：类名固定带 shop-anchor（新旧播放器都一样），这是最稳的判据
+  function shopAnchorHit(root, vr) {
+    if (!root || !root.querySelectorAll) return '';
+    let n = 0;
+    for (const el of root.querySelectorAll('[class*="shop-anchor"], [class*="shopAnchor"]')) {
+      if (++n > 4) break;
+      const r = el.getBoundingClientRect();
+      if (r.width < 40 || r.height < 16) continue;
+      if (vr && !D.near(r, vr, 40)) continue;
+      return '购物卡片';
+    }
+    return '';
   }
 
   // 电商账号：旗舰店 / 专卖店 / 小店这类名称基本只做带货
@@ -106,61 +135,86 @@
     const vr = video.getBoundingClientRect();
     const card = cardOf(video);
     let hit = attrHit(card);
+    if (!hit) hit = shopAnchorHit(card, vr);
     if (!hit) hit = textHit(card, vr);
     if (!hit) hit = shopAuthorHit(card, vr);
     // 兜底：卡片容器认错时（视频不在预期的卡片结构里），
     // 退一步在整页找"贴着视频画面"的购物卡片 —— 它固定在左下角，不随画面变化。
-    if (!hit && card !== document.body) hit = textHit(document.body, vr);
+    if (!hit && card !== document.body) hit = shopAnchorHit(document.body, vr) || textHit(document.body, vr);
     return hit;
   }
 
-  function next(video) {
-    const now = Date.now();
-    if (now - lastSkip < 1500) return;
-    lastSkip = now;
+  // 切下一条。三种手段按顺序兜底，并且**复核是否真的切走了**：
+  // 抖音的"下一条"箭头有时点不动（不可见 / 事件被拦），以前点完就当成功了，
+  // blocked 一置真就再也不试，于是那条带货视频会一直播下去。
+  function next(video, depth) {
+    const d = depth || 0;
+    // 节流只作用于"首次尝试"，复核后的重试与降级递归必须能继续执行
+    if (d === 0) {
+      const now = Date.now();
+      if (now - lastSkip < 1500) return;
+      lastSkip = now;
+    }
 
-    const arrow = document.querySelector('[data-e2e="video-switch-next-arrow"]');
+    const genAt = D.gen;
+    const arrow = d === 0 ? document.querySelector('[data-e2e="video-switch-next-arrow"]') : null;
+
     if (arrow && arrow.getBoundingClientRect().width > 0) {
       arrow.click();
-      return;
+    } else if (d <= 1) {
+      // 顺着可滚动容器滚一屏（抖音是 scroll-snap，会自动吸附到下一条）
+      let node = video.parentElement;
+      while (node && node !== document.body) {
+        const cs = getComputedStyle(node);
+        if (/(auto|scroll)/.test(cs.overflowY) && node.scrollHeight > node.clientHeight + 50) break;
+        node = node.parentElement;
+      }
+      if (node && node !== document.body) node.scrollBy({ top: node.clientHeight, behavior: 'auto' });
+      else return next(video, 2);
+    } else {
+      document.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, which: 40, bubbles: true
+      }));
     }
-    // 顺着可滚动容器滚一屏（抖音是 scroll-snap，会自动吸附到下一条）
-    let node = video.parentElement;
-    while (node && node !== document.body) {
-      const cs = getComputedStyle(node);
-      if (/(auto|scroll)/.test(cs.overflowY) && node.scrollHeight > node.clientHeight + 50) break;
-      node = node.parentElement;
-    }
-    if (node && node !== document.body) {
-      node.scrollBy({ top: node.clientHeight, behavior: 'auto' });
-      return;
-    }
-    document.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, which: 40, bubbles: true
-    }));
+
+    if (d >= 2) return;
+    // 1.4 秒后复核：代次没变 = 还是同一条视频，说明这一下没生效
+    setTimeout(() => {
+      if (!video.isConnected || document.hidden) return;
+      if (D.gen !== genAt) return;        // 已经换片了，成功
+      st.blocked = false;                 // 允许下一轮重新判定并再试
+      next(video, d + 1);
+    }, 1400);
   }
 
   function judge(video) {
     if (!(video instanceof HTMLVideoElement)) return;
     if (!document.documentElement.classList.contains('dyc-feed')) return;
-    if (video !== D.playingVideo()) return;
+    if (!video.isConnected) return;
 
-    // 换视频就重置判定状态（抖音复用同一个元素，元素上的状态不能跨视频沿用）
-    const key = videoKey(video);
-    if (key !== st.key) st = { key, passes: 0, blocked: false, last: 0 };
+    // 抖音会把相邻视频预加载在 DOM 里，判错就会把正常视频切走。
+    // 传进来的不是当前在播的那条时，改判在播的那条，并让本轮重新开始。
+    const cur = D.playingVideo();
+    if (cur && cur !== video) {
+      video = cur;
+      st.gen = -1;
+    }
+
+    // 换了视频就重置判定状态（用代次，不用 duration/src —— 它们经常是 Infinity/空串）
+    if (D.gen !== st.gen) st = { gen: D.gen, passes: 0, blocked: false, last: 0 };
 
     const now = Date.now();
     if (now - st.last < 500) return;    // 同一视频短时间内别重复扫
     st.last = now;
 
-    if (st.passes >= 4) return;         // 最多判 4 次：购物卡片有时比视频晚出现
+    if (st.passes >= 5) return;         // 最多判 5 次：购物卡片有时比视频晚出现
     st.passes++;
 
     const reason = detect(video);
     D.log('filter: 检查', reason || '未命中');
 
     if (!reason) {
-      if (st.passes < 4) setTimeout(() => judge(video), st.passes === 1 ? 900 : 1500);
+      if (st.passes < 5) setTimeout(() => judge(video), st.passes === 1 ? 900 : 1600);
       return;
     }
 
@@ -286,14 +340,14 @@
       if (!v) return null;
       return {
         hit: detect(v) || null,
-        key: videoKey(v),
+        gen: D.gen,
         passes: st.passes,
         muted: v.muted,
         paused: v.paused
       };
     },
     reset() {
-      st = { key: '', passes: 0, blocked: false, last: 0 };
+      st = { gen: -1, passes: 0, blocked: false, last: 0 };
       lastSkip = 0;
       lastScan = 0;
     }

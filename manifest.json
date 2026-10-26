@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "抖音净播 · Douyin Clean",
-  "version": "1.3.9",
+  "version": "1.6.0",
   "description": "自动最高清晰度、失焦暂停、纯净布局、直播保留/广告拦截。全部为事件驱动实现，不轮询、不全站监听，避免刷视频卡顿。",
   "icons": {
     "16": "icons/icon16.png",

@@ -1,33 +1,33 @@
-/* 自动最高清晰度 v1.3.6
+/* 自动最高清晰度 v1.5.0
  *
- * 实测结构（抖音网页版播放器）：
- *   <xg-icon class="xgplayer-playclarity-setting">
+ * 实测结构（2026-10 抖音新版播放器，容器从 .xgplayer 更名为 .douyin-player，
+ * 组件从 <xg-icon class="xgplayer-playclarity-setting"> 更名为
+ * <dy-icon class="douyin-player-playclarity-setting">，内部结构不变）：
+ *   <dy-icon class="douyin-player-playclarity-setting">
  *     <div class="gear">
- *       <div class="virtual">                    <!-- 只在真实鼠标悬停时显示 -->
- *         <div class="item">超清 4K</div>
- *         ...
- *         <div class="item selected">高清 1080P</div>
+ *       <div class="virtual">                    <!-- 档位常驻 DOM，菜单关闭时也读得到 -->
+ *         <div class="item selected">...<span>高清 1080P</span>...</div>
+ *         <div class="item">高清 720P</div>
+ *         <div class="item">智能</div>
  *       </div>
- *       <div class="btn" data-popupid="...">高清 1080P</div>
+ *       <div class="btn btnV2" data-popupid="...">高清 1080P</div>
  *     </div>
- *   </xg-icon>
+ *   </dy-icon>
+ * 兼容旧版 .xgplayer / .xgplayer-playclarity-setting 选择器。
  *
- * 本轮要点（用户手动点 4K 能成功，说明档位可用、只是合成点击没被接受）：
- *   1) 弹层链（xg-icon / gear / virtual）强制可见可命中，坐标不再为 0；
- *   2) 点击改成完整的 pointer/mouse 序列（带 pointerType、buttons、时间间隔），
- *      并在档位被其它层覆盖时向真实命中的元素补发一次 click；
- *   3) 点击后一律用 <video> 的 videoWidth/videoHeight（真实解码分辨率）复验，
- *      不以菜单文字为准；
- *   4) 某个档点完分辨率反而变低 = 该档不可用并触发顺延降级，立即点回原档止损；
- *   5) 单条视频只做一轮（最多试两个档），不会无限点、不会抖动；
- *      真正实测到 4K 才整场停手。
+ * 历次实测要点：
+ *   1) 点击用原生 HTMLElement.click()，走 app 自己的事件委托链（合成坐标事件不被接受）；
+ *   2) 点击后一律用 <video> 的 videoWidth/videoHeight（真实解码分辨率）复验，不以菜单文字为准；
+ *   3) 某档点完分辨率反而变低 = 该档不可用并触发顺延降级，立即点回原档止损；
+ *   4) 单条视频只做一轮，不无限点、不抖动；真正实测到 4K 才对本条视频停手（换下一条会重新判断）；
+ *   5) 4K 换流比低档慢得多，等待期间绝不能转去点别的档（会把换流打断）。
  */
 (() => {
   const D = window.__DYC;
   if (!D) return;
 
   const R4K = 10;              // 4K 的档位分值
-  let got4K = false;           // 本次会话已实测到 4K，后续不再调整
+  let got4K = false;           // 【当前这条视频】已实测到 4K，本轮不再调整
   let timer = 0;
   let running = false;
   let lastRun = 0;             // 上次调度的时刻（节流用）
@@ -35,7 +35,9 @@
   let curVideo = null;
   let job = 0;                 // 每次调度递增，旧任务自动作废
   let pending = false;         // 切换过程中收到的新调度：等这一轮结束再补
-  let curDur = 0;              // 当前视频时长（取整），用于识别"换了一条新视频"
+  let qGen = -1;               // 上次处理过的视频代次（见 core.js 的 D.gen）
+  let maxedGen = -1;           // 已经确认"这条视频已是最高档"的代次，不再重复评估
+  let queuedGen = -1;          // 已经为哪个代次排过队（防止同一条视频被反复排队、把排队中的任务作废）
   const dead = new Map();      // 档位文本 -> 冷却截止时间（点过但没生效的档不再反复点）
 
   const isDead = txt => {
@@ -79,16 +81,20 @@
     return v ? Math.max(v.videoWidth || 0, v.videoHeight || 0) : 0;
   }
 
+  // 新版播放器容器是 .douyin-player，旧版是 .xgplayer；清晰度组件同理
+  const GROUP_SEL = '.xgplayer, .douyin-player';
+  const COMP_SEL = '.xgplayer-playclarity-setting, .douyin-player-playclarity-setting';
+
   function groupOf(v) {
     if (v && v.closest) {
-      const vp = v.closest('.xgplayer');
+      const vp = v.closest(GROUP_SEL);
       if (vp) {
-        const g = vp.querySelector('.xgplayer-playclarity-setting');
+        const g = vp.querySelector(COMP_SEL);
         if (g) return g;
       }
     }
     // 兜底：页面里可见的清晰度组件中，挑离视频右下角最近的那个
-    const all = document.querySelectorAll('.xgplayer-playclarity-setting');
+    const all = document.querySelectorAll(COMP_SEL);
     if (!all.length) return null;
     if (!v) return all[0];
     const vr = v.getBoundingClientRect();
@@ -223,26 +229,37 @@
     }, 1200);
   }
 
-  async function attempt(id) {
-    if (running || got4K || id !== job) return;
-    if (!document.documentElement.classList.contains('dyc-feed')) return;
+  async function attempt(id, gen0) {
+    // 早退时必须把排队标记清掉，否则这条视频再也排不上队
+    if (running || got4K || id !== job) { queuedGen = -1; return; }
+    if (gen0 !== qGen) { queuedGen = -1; return; }          // 视频已经换了，这一轮作废
+    if (!document.documentElement.classList.contains('dyc-feed')) { queuedGen = -1; return; }
 
     const v = (curVideo instanceof HTMLVideoElement) ? curVideo : D.playingVideo();
-    // 刚换视频时清晰度组件可能还停留在上一条的状态，等元数据就绪再看
-    if (!v || v.readyState < 1) return;
+    // 刚换视频时清晰度组件可能还停留在上一条的状态，等元数据就绪再看。
+    // 以前这里直接 return，视频刚起播（readyState=0）时就永久放弃，
+    // 而抖音换片后 emptied/loadedmetadata 只来一次，于是这条视频再也不会调清晰度。
+    if (!v || v.readyState < 1) {
+      queuedGen = -1;
+      setTimeout(() => {
+        if (!got4K && !running && curVideo) D.quality.schedule(curVideo);
+      }, 1000);
+      return D.log('quality: 元数据未就绪，1 秒后重试');
+    }
 
     const g = groupOf(v);
-    if (!g) return D.log('quality: 找不到清晰度组件');
+    if (!g) { queuedGen = -1; return D.log('quality: 找不到清晰度组件'); }
 
     // 用播放器自己的按钮点开菜单（原生 click，走 app 自己的事件链），
     // 档位节点由 app 自己渲染；只点一次，重复点会把已经打开的菜单又关回去。
     openMenu(g);
     for (let i = 0; i < 6 && !itemsOf(g).length; i++) {
       await D.sleep(250);
-      if (id !== job) { closeMenu(g); return; }
+      if (id !== job) { closeMenu(g); queuedGen = -1; return; }
     }
     if (!itemsOf(g).length) {
       closeMenu(g);
+      queuedGen = -1;
       // 档位表可能还没请求回来：1.5 秒后再排一次，别像上一版那样一次失败就彻底不管
       setTimeout(() => { if (!got4K && !running) D.quality.schedule(v); }, 1500);
       return D.log('quality: 档位列表还没建好（按钮点了但没渲染出档位）');
@@ -252,10 +269,10 @@
     // 弹层从这里一直保持展开到 finally，中途绝不收起：
     // 收起会触发抖音卸载 .virtual 里的档位节点，之后再点按钮时已经完全找不到 item。
     const s = await stableSnap(g);
-    if (id !== job || got4K) { closeMenu(g); return; }
+    if (id !== job || got4K) { closeMenu(g); queuedGen = -1; return; }
 
     const rows = s.rows.slice().sort((a, b) => b.rk - a.rk);
-    if (!rows.length) { closeMenu(g); return D.log('quality: 没读到任何档位'); }
+    if (!rows.length) { closeMenu(g); queuedGen = -1; return D.log('quality: 没读到任何档位'); }
 
     const before = actualMax(v);
     const top = rows[0];
@@ -263,13 +280,16 @@
 
     // 实测分辨率已经到最高档的标称值：不需要动作
     if (top.nom > 0 && before >= top.nom * 0.9) {
+      maxedGen = gen0;                 // 这条视频到此为止，后续 emptied 不再重开菜单
       if (top.rk >= R4K) {
         got4K = true;
-        D.log('quality: 实测已是 4K(' + before + ')，后续不再调整');
+        D.log('quality: 实测已是 4K(' + before + ')，本条视频不再调整');
       } else {
         D.log('quality: 实测已是该视频最高档(' + before + ')，等下一条');
       }
+      closeMenu(g);
       lastDone = Date.now();
+      queuedGen = -1;
       return;
     }
 
@@ -287,15 +307,17 @@
         D.log('quality: 菜单已是', s.cur, '，等换流（最多', budget / 1000, '秒）');
         const after = await waitFor(v, top.nom, budget, id);
         if (top.nom > 0 && after >= top.nom * 0.9) {
+          maxedGen = gen0;
           if (after >= 3400) {
             got4K = true;
-            D.log('quality: 实测已到 4K(' + after + ')，后续不再调整');
+            D.log('quality: 实测已到 4K(' + after + ')，本条视频不再调整');
           } else {
             D.log('quality: 实测已到', after + 'p（' + (currentOf(g) || '') + '）');
           }
         } else {
-          // 菜单选了却没有对应画面：这条视频没有该档源，记入本条视频的冷却，别循环空等
-          markDead(top.txt);
+          // 菜单选了却没有对应画面：这条视频没有该档源，记入本条视频的冷却，别循环空等。
+          // 实测为 0 说明这一刻还没解码出画面（正在换流），不能据此判定该档不可用。
+          if (after > 0) markDead(top.txt);
           D.log('quality: 菜单已是', currentOf(g) || s.cur, '，但实测仍为', after + 'p');
         }
       } else {
@@ -321,9 +343,10 @@
 
           // 达标：停手（只有实测到 4K 才整场 stop）
           if (row.nom > 0 && after >= row.nom * 0.9) {
+            maxedGen = gen0;
             if (after >= 3400) {
               got4K = true;
-              D.log('quality: 实测已到 4K(' + after + ')，后续不再调整');
+              D.log('quality: 实测已到 4K(' + after + ')，本条视频不再调整');
             } else {
               D.log('quality: 已切到', nowCur || after + 'p', '（实测 ' + after + 'p）');
             }
@@ -347,14 +370,16 @@
           }
 
           // 等够了既没达标也没降级：多见于此视频没有这条源，抖音静默顺延到下一个可用档。
-          // 冷却只作用于当前这条视频，换下一条会清空（见 schedule 里的时长判断）。
-          markDead(row.txt);
+          // 冷却只作用于当前这条视频，换下一条会清空（见 schedule 里的代次判断）。
+          // 实测 0p = 还没解码出画面，不记冷却。
+          if (after > 0) markDead(row.txt);
           D.log('quality:', row.txt, '未生效（实测', after + 'p', '，菜单=' + (nowCur || '未知') + '）');
         }
       }
     } finally {
       closeMenu(g);
       running = false;
+      queuedGen = -1;
       lastDone = Date.now();
       flushPending();
     }
@@ -367,30 +392,48 @@
     // 两次评估之间至少隔 4 秒，避免同一条视频被反复点。
     schedule(video) {
       if (!(video instanceof HTMLVideoElement)) return;
-      if (got4K) return;                  // 已实测到 4K，本次会话不再调整
-      curVideo = video;
 
-      // 时长变了 = 真的换了另一条视频（换流只会改 src/分辨率，不改时长）
-      const d = Math.round((video.duration || 0) * 10);
-      const newVideo = d > 0 && curDur > 0 && d !== curDur;
-      if (d > 0) curDur = d;
+      // 换了视频：4K 闩锁和档位冷却都只对"那一条视频"有效，必须一起重置。
+      // 以前 got4K 是整场会话一次性的 —— 只要有任何一条视频到过 4K，
+      // 后面所有视频都不再调清晰度，这正是"后面的视频不往高画质切"的原因。
+      if (D.gen !== qGen) {
+        qGen = D.gen;
+        got4K = false;
+        dead.clear();
+      }
+      if (got4K) return;
+      // 这条视频已经确认过"实测已是最高档"：别再重复点开档位菜单
+      // （抖音的 emptied 事件会反复触发，不拦一下会每隔几秒就白开一次菜单）
+      if (maxedGen === qGen) return;
+      curVideo = video;
 
       // 换流进行中收到的调度，多数是换流自己改 src 让看门狗误判成"换视频"，
       // 只登记、不递增任务号 —— 否则会把正在等 4K 换流的那一轮直接作废。
       if (running) {
         pending = true;
-        if (newVideo) { dead.clear(); job++; }   // 真的换片了才打断本轮
         return;
       }
-      if (newVideo) dead.clear();
+
+      // 同一条视频已经有一个排队中的任务：直接返回。
+      // 【这是"清晰度失效"的真正原因】抖音换片会触发 emptied、播放中还会触发 playing，
+      // 看门狗每 2 秒又比对一次 src（MSE 流自己会变），于是 schedule 每隔一两秒就被调一次。
+      // 以前每次都会 job++，而 attempt 要等 QUALITY_DELAY(1.6s) 才执行，
+      // 等它跑起来 id 早就不是 job 了，第一行 `id !== job` 直接 return ——
+      // 结果一条日志都不打、画质永远停在初始档，表现得就像功能完全没生效。
+      if (queuedGen === qGen) return;
 
       const now = Date.now();
       if (now - lastRun < 700) return;
       lastRun = now;
       job++;
       const id = job;
+      const gen0 = qGen;
+      queuedGen = gen0;
       const wait = Math.max(D.QUALITY_DELAY, 4000 - (now - lastDone));
-      timer = setTimeout(() => D.idle(() => attempt(id)), wait);
+      timer = setTimeout(() => {
+        timer = 0;
+        D.idle(() => attempt(id, gen0));
+      }, wait);
     },
     probe() {
       const v = D.playingVideo();
@@ -412,8 +455,11 @@
       lastDone = 0;
       got4K = false;
       curVideo = null;
-      curDur = 0;
+      qGen = -1;
+      maxedGen = -1;
+      queuedGen = -1;
       pending = false;
+      running = false;   // 路由切换 teardown 时强制解锁，避免 attempt 卡死后全场不再调度
       dead.clear();
       job++;
     }
