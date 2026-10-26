@@ -1,4 +1,4 @@
-/* 抖音净播 v1.6.1
+/* 抖音净播 v1.7.0
  * 全部视觉改动都在这一份静态 CSS 里完成：进入页面后运行时零成本。
  * 所有规则都以 html.dyc-feed 为前提，只在"刷视频"页面生效。
  * html.dyc-ui-on 由 JS 按鼠标状态切换：进入视频画面或在画面上移动即显示，
@@ -30,7 +30,9 @@ html.dyc-feed .douyin-player-controls,
 html.dyc-feed .slider-video [data-e2e*="avatar"],
 html.dyc-feed .slider-video [data-e2e*="follow"],
 html.dyc-feed .slider-video > *,
-html.dyc-feed [data-dyc-ui] {
+html.dyc-feed [data-dyc-ui],
+html.dyc-feed [data-e2e="video-play-more"],
+html.dyc-feed :has(+ [data-e2e="video-play-more"]) {
   transition: opacity 0.18s ease !important;
 }
 
@@ -40,7 +42,10 @@ html.dyc-feed [data-dyc-ui] {
  *   ③ 右侧互动按钮本身（按 data-e2e 定位，类名被哈希化也不受影响）；
  *   ④ 作者头像 / 关注按钮（评论输入框里的头像排除在外）；
  *   ⑤ 底部播放控制条（含最右侧的省略号）——抖音自己要等 5~8 秒才收，这里统一到 2 秒；
- *   ⑥ JS 精确标记过的 [data-dyc-ui]。
+ *   ⑥ JS 精确标记过的 [data-dyc-ui]；
+ *   ⑦ 互动栏末尾的「更多」省略号，以及紧跟它前面的「听抖音」按钮。
+ *      这两个挂在互动栏最底部，类名全是哈希；点赞等按钮有静态规则兜底，
+ *      它们没有，所以这里按 data-e2e 和相邻关系直接命中，不依赖 JS 标记。
  * 评论区是用户手动开关的，用 [data-e2e="comment-list"] 从①里排除掉。 */
 html.dyc-feed:not(.dyc-ui-on) .slider-video > *:not(:has(video)):not(:has([data-e2e="comment-list"], [data-e2e*="comment-panel"], [class*="comment-list"], [class*="comment-panel"])),
 html.dyc-feed:not(.dyc-ui-on) .video-info-detail,
@@ -52,6 +57,8 @@ html.dyc-feed:not(.dyc-ui-on) .slider-video :not([data-e2e*="comment"]) [data-e2
 html.dyc-feed:not(.dyc-ui-on) .slider-video :not([data-e2e*="comment"]) [data-e2e*="follow"],
 html.dyc-feed:not(.dyc-ui-on) .xgplayer-controls,
 html.dyc-feed:not(.dyc-ui-on) .douyin-player-controls,
+html.dyc-feed:not(.dyc-ui-on) [data-e2e="video-play-more"],
+html.dyc-feed:not(.dyc-ui-on) :has(+ [data-e2e="video-play-more"]),
 html.dyc-feed:not(.dyc-ui-on) [data-dyc-ui] {
   opacity: 0 !important;
   pointer-events: none !important;

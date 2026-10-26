@@ -60,14 +60,24 @@
     </section>
 
     <section class="card">
+      <h2>布局精简 · 顶栏</h2>
+      <div class="seg" role="radiogroup" aria-label="顶栏模式">
+        <label><input type="radio" name="headerMode" value="simple"><span>默认精简</span></label>
+        <label><input type="radio" name="headerMode" value="custom"><span>自定义保留</span></label>
+        <label><input type="radio" name="headerMode" value="off"><span>保持原样</span></label>
+      </div>
+
+      <div id="headerCustom" class="nav-custom" hidden>
+        <div class="nav-head">
+          <span>勾选要保留的图标，其余隐藏（头像始终保留）</span>
+        </div>
+        <div id="headerList" class="nav-list"></div>
+        <p id="headerHint" class="hint"></p>
+      </div>
+    </section>
+
+    <section class="card">
       <h2>布局精简 · 其他</h2>
-      <label class="row">
-        <span class="row-main">
-          <span class="row-title">顶栏图标精简</span>
-          <span class="row-desc">右上角只留头像、通知、消息</span>
-        </span>
-        <input class="switch" type="checkbox" data-key="header">
-      </label>
       <label class="row">
         <span class="row-main">
           <span class="row-title">浮层自动隐藏</span>

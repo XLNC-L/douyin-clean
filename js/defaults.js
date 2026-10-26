@@ -8,7 +8,10 @@
     filter: true,           // 广告 / 带货过滤 + 直播小窗清理
     pause: true,            // 失焦自动暂停
     overlay: true,          // 标题 / 互动栏自动隐藏
-    header: true,           // 顶栏图标精简
+    header: {
+      mode: 'simple',       // simple=默认精简（头像/通知/消息）| custom=自定义保留 | off=保持原样
+      keep: ['通知', '消息'] // custom 模式下要保留的图标文案
+    },
     nav: {
       mode: 'hide',         // hide=整条隐藏 | custom=逐项保留 | off=保持原样
       keep: ['我的']        // custom 模式下要保留的导航项文案
@@ -25,12 +28,25 @@
         .filter(s => typeof s === 'string' && s && s.length <= 24)
         .slice(0, 30)
       : DEFAULTS.nav.keep.slice();
+
+    // header 旧版是布尔值：true=默认精简、false=保持原样，这里做兼容迁移
+    const hdr = r.header;
+    const h = (hdr && typeof hdr === 'object') ? hdr : {};
+    const headerMode = hdr === false ? 'off'
+      : hdr === true ? 'simple'
+        : (h.mode === 'custom' || h.mode === 'off') ? h.mode : 'simple';
+    const headerKeep = Array.isArray(h.keep)
+      ? h.keep
+        .filter(s => typeof s === 'string' && s && s.length <= 24)
+        .slice(0, 20)
+      : DEFAULTS.header.keep.slice();
+
     return {
       quality: r.quality !== false,
       filter: r.filter !== false,
       pause: r.pause !== false,
       overlay: r.overlay !== false,
-      header: r.header !== false,
+      header: { mode: headerMode, keep: headerKeep },
       nav: { mode, keep }
     };
   }

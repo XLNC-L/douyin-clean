@@ -5,7 +5,8 @@
  *   - 鼠标从画面外进入画面 -> 立即显示；
  *   - 鼠标在画面内移动 -> 一直显示（每次移动都重置计时）；
  *   - 鼠标停下不动 2 秒 -> 自动隐藏；
- *   - 鼠标移出画面 2 秒 -> 自动隐藏（移出后不再重置计时，避免在画面外乱动导致永不隐藏）。
+ *   - 鼠标移出画面 2 秒 -> 自动隐藏（移出后不再重置计时，避免在画面外乱动导致永不隐藏）；
+ *   - 视频暂停 -> 立即收起一次；之后仍按上面的规则：鼠标一动就显示，静止 2 秒再收起。
  *
  * 实测：这些浮层都是 .slider-video 卡片里、位于 .xgplayer 之外的 position:absolute 元素，
  * 而点赞按钮的祖先链是 45 → 50 → 50 → 66 宽、高度 68 → 493 → 493 → 509。
@@ -93,16 +94,30 @@
     });
   }
 
+  // 抖音会把下一条视频预加载在 DOM 里，同一选择器可能命中多张卡片；
+  // 取离当前画面最近的那个，避免标记到别的卡片上导致整条互动栏没被标记。
+  function pickNear(sel, vr, pad) {
+    let best = null;
+    let bestD = Infinity;
+    document.querySelectorAll(sel).forEach(el => {
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) return;
+      if (!D.near(r, vr, pad)) return;
+      const d = Math.abs((r.left + r.right) - (vr.left + vr.right)) +
+        Math.abs((r.top + r.bottom) - (vr.top + vr.bottom));
+      if (d < bestD) { bestD = d; best = el; }
+    });
+    return best;
+  }
+
   // 整条右侧互动栏：优先取"点赞/评论/收藏/分享"的最近公共祖先（不依赖任何哈希类名），
   // 公共祖先过大时退回"从点赞按钮向上找窄而高的一层"。
   function markRail(vr) {
     const limitW = Math.max(160, vr.width * 0.25);
     const picks = [];
     for (const sel of [D.SEL.digg, D.SEL.commentIcon, D.SEL.collect, D.SEL.share]) {
-      const el = document.querySelector(sel);
-      if (!el) continue;
-      if (!D.near(el.getBoundingClientRect(), vr, 140)) continue;
-      picks.push(el);
+      const el = pickNear(sel, vr, 140);
+      if (el) picks.push(el);
     }
 
     if (picks.length >= 2) {
@@ -116,9 +131,8 @@
       }
     }
 
-    const digg = document.querySelector(D.SEL.digg);
+    const digg = pickNear(D.SEL.digg, vr, 140);
     if (!digg) return;
-    if (!D.near(digg.getBoundingClientRect(), vr, 140)) return;
 
     let node = digg.parentElement;
     let best = null;
@@ -159,6 +173,42 @@
     }
   }
 
+  // 互动栏最底部的「听抖音」和「更多（省略号）」：
+  // 类名全是哈希，只有 data-e2e 和文案可靠；「听抖音」正好是「更多」的前一个兄弟节点。
+  // 它们不在点赞等按钮的静态隐藏规则里，必须单独标记，否则整条互动栏藏了它还露着。
+  function markExtra(v, vr) {
+    let found = false;
+    document.querySelectorAll('[data-e2e="video-play-more"]').forEach(more => {
+      const r = more.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1 || !D.near(r, vr, 60)) return;
+      mark(more);
+      const rail = more.parentElement;
+      if (!rail) return;
+      for (const child of rail.children) {
+        if (D.textOf(child) === '听抖音') {
+          mark(child);
+          found = true;
+        }
+      }
+    });
+    if (found) return;
+
+    // 兜底：某些布局没有「更多」按钮，按文案在卡片内找一次
+    const card = cardOf(v, vr) || v.parentElement;
+    if (!card) return;
+    let n = 0;
+    for (const el of card.querySelectorAll('div')) {
+      if (++n > 1200) break;
+      if (D.textOf(el) !== '听抖音') continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1 || !D.near(r, vr, 60)) continue;
+      let box = el;
+      while (box.parentElement && D.textOf(box.parentElement) === '听抖音') box = box.parentElement;
+      mark(box);
+      break;
+    }
+  }
+
   function sync(video) {
     if (!enabled()) {
       clearTimeout(timer);
@@ -188,9 +238,11 @@
     markInfo(vr);
     markRail(vr);
     markOverlays(v, vr);
+    markExtra(v, vr);
     // 新视频默认保持干净；但鼠标还在画面里时不要突然隐藏，
     // 否则会表现为"刚动一下就瞬间消失"，和 2 秒延迟的规则不一致。
-    if (!wasInside) hide();
+    // 暂停的视频例外：切过去先立即收起一次。
+    if (v.paused || !wasInside) hide();
     D.log('overlay: 已标记浮层', marked.length, '个');
   }
 
@@ -211,6 +263,15 @@
         rectAt = now;
       }
       if (!currentRect) return;
+      // 缓存的元素被播放器重渲染移出 DOM 时，矩形会是 0；退回当前在播的视频重取
+      if (!currentRect.width || !currentRect.height) {
+        const live = D.playingVideo();
+        if (live && live !== currentVideo) {
+          currentVideo = live;
+          currentRect = live.getBoundingClientRect();
+          rectAt = now;
+        }
+      }
     }
 
     const r = currentRect;
@@ -236,6 +297,23 @@
     if (raf) return;
     raf = requestAnimationFrame(onMove);
   }, { passive: true });
+
+  // 暂停 / 恢复由播放器事件驱动，不轮询。
+  // 只认当前在播的那条视频，预加载的相邻视频暂停不会影响当前画面。
+  // 暂停瞬间立即收起一次；之后鼠标移动照常显示，静止 2 秒照常收起。
+  document.addEventListener('pause', e => {
+    if (!(e.target instanceof HTMLVideoElement) || !html.classList.contains('dyc-feed')) return;
+    const v = currentVideo || D.playingVideo();
+    if (e.target !== v) return;
+    hide();
+  }, true);
+  document.addEventListener('play', e => {
+    if (!(e.target instanceof HTMLVideoElement) || !html.classList.contains('dyc-feed')) return;
+    const v = currentVideo || D.playingVideo();
+    if (e.target !== v) return;
+    // 鼠标还停在画面上时，恢复播放也把浮层带回来
+    if (wasInside) show();
+  }, true);
 
   // 视口变化时刷新缓存矩形（只做一次，不循环）
   window.addEventListener('resize', () => {

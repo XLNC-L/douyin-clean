@@ -79,6 +79,7 @@
         version: D.VER,
         settings: D.settings,
         navItems: D.nav ? D.nav.labels() : [],
+        headerItems: D.header ? D.header.labels() : [],
         page: location.pathname
       });
     });

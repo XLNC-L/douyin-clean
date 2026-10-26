@@ -14,6 +14,7 @@
 
   let settings = normalize(DEFAULTS);
   let navItems = [];
+  let headerItems = [];
   let connected = false;
   let toastTimer = 0;
 
@@ -36,8 +37,13 @@
     $$('input[name="navMode"]').forEach(el => {
       el.checked = el.value === settings.nav.mode;
     });
+    $$('input[name="headerMode"]').forEach(el => {
+      el.checked = el.value === settings.header.mode;
+    });
     $('#navCustom').hidden = settings.nav.mode !== 'custom';
+    $('#headerCustom').hidden = settings.header.mode !== 'custom';
     renderNav();
+    renderHeader();
   }
 
   function renderNav() {
@@ -76,6 +82,42 @@
     hint.textContent = '未勾选的入口会被隐藏，改动即时生效；一个都不勾选时整条导航隐藏。';
   }
 
+  function renderHeader() {
+    const list = $('#headerList');
+    const hint = $('#headerHint');
+    list.textContent = '';
+
+    if (!headerItems.length) {
+      hint.textContent = connected
+        ? '当前页面没有识别到可自定义的顶栏图标；打开抖音视频页并刷新后再试。'
+        : '打开抖音网页版并刷新后，这里会列出可保留的顶栏图标。';
+      return;
+    }
+
+    for (const label of headerItems) {
+      const chip = document.createElement('label');
+      chip.className = 'chip';
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = settings.header.keep.indexOf(label) !== -1;
+      cb.addEventListener('change', () => {
+        const keep = new Set(settings.header.keep);
+        if (cb.checked) keep.add(label);
+        else keep.delete(label);
+        settings.header.keep = Array.from(keep);
+        save();
+      });
+
+      const text = document.createElement('span');
+      text.textContent = label;
+
+      chip.append(cb, text);
+      list.append(chip);
+    }
+    hint.textContent = '未勾选的图标会被隐藏，改动即时生效；一个都不勾选时只保留头像。';
+  }
+
   // 立即写 storage：面板随时可能被点外面关掉，延迟保存会丢改动
   function save() {
     settings = normalize(settings);
@@ -104,6 +146,15 @@
       el.addEventListener('change', () => {
         if (!el.checked) return;
         settings.nav.mode = el.value;
+        render();
+        save();
+      });
+    });
+
+    $$('input[name="headerMode"]').forEach(el => {
+      el.addEventListener('change', () => {
+        if (!el.checked) return;
+        settings.header.mode = el.value;
         render();
         save();
       });
@@ -144,6 +195,7 @@
       const state = await chrome.tabs.sendMessage(tab.id, { type: 'dyc:get-state' });
       connected = true;
       navItems = (state && Array.isArray(state.navItems)) ? state.navItems.slice(0, 30) : [];
+      headerItems = (state && Array.isArray(state.headerItems)) ? state.headerItems.slice(0, 20) : [];
       $('#ver').textContent = 'v' + (state && state.version ? state.version : chrome.runtime.getManifest().version);
       setStatus('已连接当前抖音页面');
       render();
