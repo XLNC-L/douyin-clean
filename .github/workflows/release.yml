@@ -40,6 +40,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # 幂等：改写提交历史后重推标签、或误重推标签时，Release 已经存在，
+          # 这里直接跳过，避免整条流程报红（以前会在 gh release create 处直接失败）。
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} 已存在，跳过创建"
+            exit 0
+          fi
           gh release create "${GITHUB_REF_NAME}" "douyin-clean-${GITHUB_REF_NAME}.zip" \
             --title "抖音净播 ${GITHUB_REF_NAME}" \
             --notes-file notes.md
