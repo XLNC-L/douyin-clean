@@ -65,6 +65,17 @@ if (exists('popup.html')) {
   pass('popup.html 本地资源');
 }
 
+// README 里引用的本地图片（Release 包会带上 docs）
+if (exists('README.md')) {
+  const md = read('README.md');
+  const imgs = [...md.matchAll(/!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map(m => m[1]);
+  for (const p of imgs) {
+    if (/^https?:/i.test(p)) continue;
+    if (!exists(p)) bad('README.md 引用的图片不存在：' + p);
+  }
+  pass('README 本地图片 ' + imgs.filter(p => !/^https?:/i.test(p)).length + ' 个');
+}
+
 // 3) core VER 与 manifest 对齐
 if (exists('js/core.js')) {
   const m = read('js/core.js').match(/VER:\s*'([^']+)'/);

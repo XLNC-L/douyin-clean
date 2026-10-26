@@ -5,9 +5,17 @@
 ![manifest](https://img.shields.io/badge/Manifest-V3-4285F4)
 ![platform](https://img.shields.io/badge/Chrome-Desktop-34A853)
 
+当前版本：[v1.6.1](https://github.com/XLNC-L/douyin-clean/releases/tag/v1.6.1) · [更新日志](CHANGELOG.md)
+
 ![界面示意：左为默认界面，右为启用扩展后](docs/preview.svg)
 
 一个针对**网页版抖音**（`www.douyin.com`）的 Chrome 扩展：**自动最高清晰度**、**带货广告自动跳过**、**失焦暂停**、**纯净布局**，所有功能都能在扩展面板里分项开关。不做列表轮询、不全站监听、不删 DOM 节点 —— 刷视频不卡。
+
+## 最新变化（v1.6.1）
+
+- 新增**设置面板**：清晰度 / 广告过滤 / 失焦暂停 / 布局都能分项开关，改动即时生效；
+- 左侧导航支持**逐项保留**，例如只留「我的」，其余入口、下载 APP 推广与备案页脚一起隐藏；
+- 补全新版播放器 `.douyin-player` 兼容，广告 / 带货判定排除评论区，标题相同的连续视频不再串台。
 
 ## 它解决什么问题
 
@@ -51,6 +59,8 @@ git clone https://github.com/XLNC-L/douyin-clean.git
 ## 设置
 
 点工具栏的扩展图标打开设置面板。设置保存在 `chrome.storage.sync`，登录同一 Chrome 账号的设备会同步。
+
+![设置面板示意：功能分项开关与左侧导航逐项保留](docs/settings.svg)
 
 - **功能**：自动最高清晰度、广告 / 带货过滤、失焦自动暂停，各自独立开关；
 - **布局精简 · 左侧导航**：
@@ -111,6 +121,7 @@ js/main.js         启动、新视频检测、失焦暂停、调试
 js/popup.js        设置面板逻辑
 scripts/check.mjs  静态校验（manifest / 版本 / 语法 / 文件引用）
 docs/preview.svg   README 顶部的界面示意
+docs/settings.svg  设置面板示意
 CHANGELOG.md       逐版本改动记录
 ```
 

@@ -27,5 +27,5 @@ jobs:
 
       - name: 打包冒烟
         run: |
-          zip -r /tmp/douyin-clean-check.zip manifest.json popup.html css js icons README.md LICENSE
+          zip -r /tmp/douyin-clean-check.zip manifest.json popup.html css js icons docs README.md LICENSE
           unzip -l /tmp/douyin-clean-check.zip | tail -6

@@ -36,7 +36,7 @@ jobs:
         run: |
           NAME="douyin-clean-${GITHUB_REF_NAME}"
           # manifest.json 必须在压缩包根目录，Chrome 才能直接加载
-          zip -r "${NAME}.zip" manifest.json popup.html css js icons README.md LICENSE
+          zip -r "${NAME}.zip" manifest.json popup.html css js icons docs README.md LICENSE
           ls -lh "${NAME}.zip"
 
       - name: 准备 Release 说明

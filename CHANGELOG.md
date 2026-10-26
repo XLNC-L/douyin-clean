@@ -26,8 +26,8 @@
 ### 工程
 
 - 新增 `scripts/check.mjs` 与 CI：校验 manifest、版本一致性、文件引用、JS 语法、MV3 安全红线，并做打包冒烟；
-- Release 工作流在打包前校验 tag 与 `manifest.json` 版本一致，压缩包补上 `popup.html`；
-- README 修正「零轮询 / 零样式计算」的过度表述，补充设置面板与逐项导航说明。
+- Release 工作流在打包前校验 tag 与 `manifest.json` 版本一致，压缩包补上 `popup.html` 与 `docs/` 图片；
+- README 修正「零轮询 / 零样式计算」的过度表述，补充设置面板、逐项导航与 v1.6.1 变化说明，并新增设置面板示意图。
 
 ## [1.6.0] - 2026-10-26
 
