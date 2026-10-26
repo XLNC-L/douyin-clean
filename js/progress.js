@@ -179,6 +179,21 @@
     fill = null;
   }
 
+  // 预加载的相邻视频也会触发媒体事件 / 被 main.js 传进来。
+  // 进度条只应该挂在"当前屏幕上这张卡片"的视频上；优先用 feed-active-video，
+  // 没有再退回传进来的视频 / 当前在播视频。自动跳广告后卡片会换，这一步能防止
+  // 线条被留在上一张或屏幕外的预加载卡片里。
+  function visibleVideo(v) {
+    const active = document.querySelector('[data-e2e="feed-active-video"]');
+    const activeVideo = active && active.querySelector('video');
+    const pool = [activeVideo, v, D.playingVideo()].filter(Boolean);
+    for (const c of pool) {
+      const r = c.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return c;
+    }
+    return pool[0] || null;
+  }
+
   // 预加载的相邻视频也会触发媒体事件 / 被 main.js 传进来，
   // 统一只认"当前在播且面积最大"的那个，避免线条挂到屏幕外的卡片上。
   function attach(v) {
@@ -191,9 +206,7 @@
     if (!html.classList.contains(ON_CLASS)) html.classList.add(ON_CLASS);
     // 同理补颜色变量；值相同就跳过，避免每次换片都让整页样式失效。
     if (html.style.getPropertyValue('--dyc-progress-color') !== colorOf()) paintColor();
-    const target = (v && !v.paused && !v.ended && v.readyState >= 2)
-      ? v
-      : (D.playingVideo() || v);
+    const target = visibleVideo(v);
     if (!target) return;
     if (!ensure(target)) return;
     paint(true);
@@ -246,14 +259,15 @@
     // 给 main.js 的 2 秒看门狗和 overlay 的显示切换用，暂停时也能把线条补回来。
     sync(v) {
       if (!enabled() || !html.classList.contains('dyc-feed')) return;
-      const target = v || D.playingVideo();
+      const target = visibleVideo(v);
       if (!target) return;
+      // 先补开关类和颜色，防止设置回调/重渲染把样式丢了却被下面的幂等判断直接放行
+      if (!html.classList.contains(ON_CLASS)) html.classList.add(ON_CLASS);
+      if (html.style.getPropertyValue('--dyc-progress-color') !== colorOf()) paintColor();
       const nextHost = target.closest('.xgplayer, .douyin-player') || target.parentElement;
       if (video === target && host === nextHost && bar && bar.isConnected) return;
       // 这里不用 attach()：暂停时 attach 会退回 D.playingVideo()，可能挂到别的预加载卡片上；
       // 看门狗 / 显示切换传进来的就是当前视频，直接挂它。
-      if (!html.classList.contains(ON_CLASS)) html.classList.add(ON_CLASS);
-      if (html.style.getPropertyValue('--dyc-progress-color') !== colorOf()) paintColor();
       if (!ensure(target)) return;
       paint(true);
       schedule();
