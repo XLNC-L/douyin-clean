@@ -1,4 +1,4 @@
-/* 抖音净播 v1.9.4
+/* 抖音净播 v1.9.5
  * 全部视觉改动都在这一份静态 CSS 里完成：进入页面后运行时零成本。
  * 所有规则都以 html.dyc-feed 为前提，只在"刷视频"页面生效。
  * html.dyc-ui-on 由 JS 按鼠标状态切换：进入视频画面或在画面上移动即显示，
@@ -40,6 +40,12 @@ html.dyc-feed [data-dyc-ui],
 html.dyc-feed [data-e2e="video-play-more"],
 html.dyc-feed :has(+ [data-e2e="video-play-more"]) {
   transition: opacity 0.18s ease !important;
+}
+
+/* 「某某 推荐」这类卡片要求跟信息同步，不要额外的淡入淡出/动画，避免慢半拍 */
+html.dyc-feed [data-dyc-instant] {
+  transition: none !important;
+  animation: none !important;
 }
 
 /* 需要自动隐藏的浮层，下面几组规则互相兜底：

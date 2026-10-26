@@ -15,7 +15,7 @@
   'use strict';
 
   const D = (window.__DYC = {
-    VER: '1.9.4',
+    VER: '1.9.5',
     debug: false,
 
     // 视频代次：每换一条视频 +1。

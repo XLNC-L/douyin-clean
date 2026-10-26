@@ -5,11 +5,18 @@
 ![manifest](https://img.shields.io/badge/Manifest-V3-4285F4)
 ![platform](https://img.shields.io/badge/Chrome-Desktop-34A853)
 
-当前版本：v1.9.4 · [下载 / Releases](https://github.com/XLNC-L/douyin-clean/releases) · [更新日志](CHANGELOG.md)
+当前版本：v1.9.5 · [下载 / Releases](https://github.com/XLNC-L/douyin-clean/releases) · [更新日志](CHANGELOG.md)
 
 ![界面示意：左为默认界面，右为启用扩展后](docs/preview.svg)
 
 一个针对**网页版抖音**（`www.douyin.com`）的 Chrome 扩展：**自动最高清晰度**、**带货广告自动跳过**、**失焦暂停**、**纯净布局**、**视频底部进度细线**，所有功能都能在扩展面板里分项开关。不做列表轮询、不全站监听、不删 DOM 节点 —— 刷视频不卡。
+
+## 最新变化（v1.9.5）
+
+- **修复暂停后鼠标唤不醒浮层**：鼠标判定优先用当前活动卡片；视频元素被暂停层隐藏（矩形为 0）时退回卡片矩形，移动/滚动鼠标都能重新显示；
+- 补上 `wheel` 事件唤出：指针停在画面上滚鼠标也会显示浮层；
+- **游戏卡片改为直接隐藏**：左下角「游戏 原神 · 评分高达9.3」不再跟信息切换，避免慢半拍；
+- **「某某 推荐」卡片跟随信息显隐**：去掉过渡/动画，和标题同步出现、同步收起。
 
 ## 最新变化（v1.9.4）
 
