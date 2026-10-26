@@ -24,6 +24,11 @@
 
   // 只保留"广告 / 推广 / 赞助"这类明确标注；直播不再跳过（用户需要看直播）
   const BADGES = ['广告', '推广', '赞助'];
+  // 评论区是用户主动打开的面板：里面的"广告/推广"字样、¥价格、店铺名都不是视频本身，
+  // 必须排除出扫描范围，否则打开评论后很容易把正常视频判成带货。
+  const COMMENT_PANEL_SEL = '[data-e2e*="comment"], [class*="comment-list"], [class*="comment-panel"]';
+  // popup 设置：关闭后既不判定也不关闭小窗
+  const enabled = () => !D.settings || D.settings.filter !== false;
   // 带货视频没有"广告"徽标，但左下角会有"购物"卡片、账号名常是"XX旗舰店/专卖店"
   // 卡片样式：购物车图标 + "购物/商品名"，所以关键词后面通常紧跟分隔符；没有分隔符时
   // 必须带图标才算，避免把"购物分享"这种普通文案误判成带货。
@@ -59,6 +64,7 @@
     let n = 0;
     for (const el of root.querySelectorAll('span, div, i, em, b, p, a')) {
       if (++n > 900) break;
+      if (el.closest(COMMENT_PANEL_SEL)) continue;
       const t = D.textOf(el);
       if (!t || t.length > 24) continue;
 
@@ -95,8 +101,13 @@
 
   function attrHit(root) {
     if (!root || !root.querySelectorAll) return '';
-    const el = root.querySelector('[data-e2e*="advert" i], [aria-label="广告"], img[alt="广告"], img[alt*="购物"], img[alt*="商品"], [aria-label*="购物"]');
-    return el ? 'ad' : '';
+    let n = 0;
+    for (const el of root.querySelectorAll('[data-e2e*="advert" i], [aria-label="广告"], img[alt="广告"], img[alt*="购物"], img[alt*="商品"], [aria-label*="购物"]')) {
+      if (++n > 10) break;
+      if (el.closest(COMMENT_PANEL_SEL)) continue;
+      return 'ad';
+    }
+    return '';
   }
 
   // 商品卡容器：类名固定带 shop-anchor（新旧播放器都一样），这是最稳的判据
@@ -105,6 +116,7 @@
     let n = 0;
     for (const el of root.querySelectorAll('[class*="shop-anchor"], [class*="shopAnchor"]')) {
       if (++n > 4) break;
+      if (el.closest(COMMENT_PANEL_SEL)) continue;
       const r = el.getBoundingClientRect();
       if (r.width < 40 || r.height < 16) continue;
       if (vr && !D.near(r, vr, 40)) continue;
@@ -120,6 +132,7 @@
     let n = 0;
     for (const a of root.querySelectorAll('a[href*="/user/"], [data-e2e*="author" i]')) {
       if (++n > 8) break;
+      if (a.closest(COMMENT_PANEL_SEL)) continue;
       const t = D.textOf(a).replace(/^@/, '');
       if (!t || t.length > 20) continue;
       if (!SHOP_NAME_RE.test(t)) continue;
@@ -157,7 +170,7 @@
     }
 
     const genAt = D.gen;
-    const arrow = d === 0 ? document.querySelector('[data-e2e="video-switch-next-arrow"]') : null;
+    const arrow = d === 0 ? document.querySelector(D.SEL.nextArrow) : null;
 
     if (arrow && arrow.getBoundingClientRect().width > 0) {
       arrow.click();
@@ -189,6 +202,7 @@
 
   function judge(video) {
     if (!(video instanceof HTMLVideoElement)) return;
+    if (!enabled()) return;
     if (!document.documentElement.classList.contains('dyc-feed')) return;
     if (!video.isConnected) return;
 
@@ -283,6 +297,7 @@
   }
 
   function closePopups(video) {
+    if (!enabled()) return;
     if (!document.documentElement.classList.contains('dyc-feed')) return;
     const now = Date.now();
     if (now - lastClose < 800) return;                   // 关得太密容易误伤别的东西
@@ -321,8 +336,12 @@
     if (!hit) return;
     // 私信/消息抽屉里的关闭按钮不是"直播小窗"，别去点它
     if (hit.closest('aside')) return;
-    // 别去点播放器自己的按钮
-    if (main && hit.closest('.xgplayer') && hit.closest('.xgplayer') === main.closest('.xgplayer')) return;
+    // 登录弹层的关闭按钮也不碰（部分版本没有 aria-label，只靠 class 命中）
+    if (hit.closest('#login-full-panel, [id^="login-full-panel"]')) return;
+    // 别去点正在播放的主播放器自己的按钮；新旧播放器容器都要判
+    const mainBox = main ? main.closest('.xgplayer, .douyin-player') : null;
+    const hitBox = hit.closest('.xgplayer, .douyin-player');
+    if (mainBox && hitBox === mainBox) return;
 
     tries.set(hit, (tries.get(hit) || 0) + 1);
     lastClose = now;
@@ -335,6 +354,14 @@
       judge(video);
     },
     closePopups,
+    applySettings() {
+      if (!enabled()) {
+        this.reset();
+        return;
+      }
+      const v = D.playingVideo();
+      if (v) judge(v);
+    },
     probe() {
       const v = D.playingVideo();
       if (!v) return null;

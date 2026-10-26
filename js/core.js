@@ -2,7 +2,9 @@
  *
  * 性能红线（下面所有模块都必须遵守）：
  * 1) 视觉改动全部交给静态 CSS，运行时不写 style、不读布局；
- * 2) 不监听 document.body 的子树 MutationObserver，不开启任何 setInterval 轮询；
+ * 2) 不做列表轮询、不全站监听。唯一的定时器是 main.js 里 2 秒一次的视频身份看门狗，
+ *    只比对 <video> 引用与卡片文案指纹；导航逐项隐藏用的是 #douyin-navigation 内的
+ *    局部 MutationObserver（仅 custom 模式启用），不会观察整页；
  * 3) 刷视频的时机只来自媒体事件（loadedmetadata / play 捕获阶段），事件驱动；
  * 4) 鼠标事件 passive，且每帧最多处理一次，只切换一个 class；
  * 5) 扫描类操作只在启动时做一次，并且有数量上限。
@@ -11,7 +13,7 @@
   'use strict';
 
   const D = (window.__DYC = {
-    VER: '1.6.0',
+    VER: '1.6.1',
     debug: false,
 
     // 视频代次：每换一条视频 +1。

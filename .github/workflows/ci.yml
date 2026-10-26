@@ -1,0 +1,31 @@
+name: CI
+
+# 每次推 main / 开 PR 时做静态校验与打包冒烟：
+# manifest 是否合法、版本号是否对齐、引用的文件是否都在、JS 是否有语法错误。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 静态校验
+        run: node scripts/check.mjs
+
+      - name: 打包冒烟
+        run: |
+          zip -r /tmp/douyin-clean-check.zip manifest.json popup.html css js icons README.md LICENSE
+          unzip -l /tmp/douyin-clean-check.zip | tail -6

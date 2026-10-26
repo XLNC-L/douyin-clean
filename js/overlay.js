@@ -30,6 +30,8 @@
   let rectAt = 0;             // currentRect 的取样时刻
 
   const html = document.documentElement;
+  // popup 设置：关闭后所有浮层常显，不再标记、不再计时隐藏
+  const enabled = () => !D.settings || D.settings.overlay !== false;
 
   function arm() {
     clearTimeout(timer);
@@ -37,11 +39,18 @@
   }
 
   function show() {
+    if (!enabled()) {
+      clearTimeout(timer);
+      timer = 0;
+      if (!html.classList.contains('dyc-ui-on')) html.classList.add('dyc-ui-on');
+      return;
+    }
     if (!html.classList.contains('dyc-ui-on')) html.classList.add('dyc-ui-on');
     arm();
   }
 
   function hide() {
+    if (!enabled()) return;
     clearTimeout(timer);
     timer = 0;
     html.classList.remove('dyc-ui-on');
@@ -126,7 +135,8 @@
     // 拿不到 slider-video 时退两层（播放器容器 + 卡片层），仍能覆盖浮层
     const card = cardOf(v, vr) || (v.parentElement && v.parentElement.parentElement);
     if (!card) return;
-    const xp = v.closest('.xgplayer');
+    // 新旧播放器容器都要排除：新版是 .douyin-player，控制条也有自己的 .douyin-player-controls
+    const xp = v.closest('.xgplayer, .douyin-player');
     const vArea = Math.max(1, vr.width * vr.height);
     const nodes = card.querySelectorAll('div, span, section, aside, ul, li, a, button, img');
     let n = 0;
@@ -134,6 +144,8 @@
       if (++n > 900) break;
       if (xp && xp !== el && xp.contains(el)) continue;     // 播放器控制条不动
       if (el.contains(v)) continue;
+      // 评论区是手动开关的面板，里面的评论 / 商品链接不参与自动隐藏
+      if (el.closest('[data-e2e*="comment"], [class*="comment-list"], [class*="comment-panel"]')) continue;
       const r = el.getBoundingClientRect();
       if (r.width < 10 || r.height < 10) continue;
       if (!D.near(r, vr, 24)) continue;
@@ -148,6 +160,16 @@
   }
 
   function sync(video) {
+    if (!enabled()) {
+      clearTimeout(timer);
+      timer = 0;
+      if (!html.classList.contains('dyc-ui-on')) html.classList.add('dyc-ui-on');
+      clearMarks();
+      currentVideo = null;
+      currentRect = null;
+      return;
+    }
+
     const v = video || D.playingVideo();
     if (!v) return;
     const vr = v.getBoundingClientRect();
@@ -176,6 +198,7 @@
     raf = 0;
     const e = pending;
     pending = null;
+    if (!enabled()) return;
     if (!e || !html.classList.contains('dyc-feed')) return;
 
     // 画面矩形按需刷新：最多每 250ms 读一次布局，既不会用到换视频/开评论后的旧尺寸，
@@ -222,6 +245,26 @@
 
   D.overlay = {
     sync,
+    applySettings() {
+      if (!html.classList.contains('dyc-feed')) {
+        clearMarks();
+        return;
+      }
+      if (!enabled()) {
+        clearTimeout(timer);
+        timer = 0;
+        if (!html.classList.contains('dyc-ui-on')) html.classList.add('dyc-ui-on');
+        clearMarks();
+        currentVideo = null;
+        currentRect = null;
+        return;
+      }
+      // 从"关闭"切回"开启"时，强制重新标记一次，别被 500ms 去重挡住
+      currentVideo = null;
+      currentRect = null;
+      syncAt = 0;
+      sync();
+    },
     reset() {
       clearMarks();
       hide();

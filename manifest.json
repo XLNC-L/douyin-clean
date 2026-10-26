@@ -1,8 +1,10 @@
 {
   "manifest_version": 3,
   "name": "抖音净播 · Douyin Clean",
-  "version": "1.6.0",
-  "description": "自动最高清晰度（含 4K）、带货广告自动跳过、失焦暂停、纯净布局。事件驱动实现，不轮询、不全站监听，刷视频不卡顿。",
+  "version": "1.6.1",
+  "description": "自动最高清晰度（含 4K）、带货广告自动跳过、失焦暂停、纯净布局，并支持分项开关与左侧导航逐项保留。事件驱动实现，不轮询列表，刷视频不卡顿。",
+  "permissions": ["storage"],
+  "host_permissions": ["https://www.douyin.com/*"],
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -11,6 +13,7 @@
   },
   "action": {
     "default_title": "抖音净播 · Douyin Clean",
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
@@ -26,6 +29,9 @@
       "css": ["css/content.css"],
       "js": [
         "js/core.js",
+        "js/defaults.js",
+        "js/settings.js",
+        "js/nav.js",
         "js/overlay.js",
         "js/quality.js",
         "js/filter.js",

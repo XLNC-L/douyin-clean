@@ -21,6 +21,8 @@
   let lastSrc = '';
   let lastGenAt = 0;
   let lastSig = "";
+  let lastCard = null;
+  let lastPoster = '';
 
   const srcOf = v => (v && (v.currentSrc || v.src)) || '';
 
@@ -33,9 +35,12 @@
     D.filter.reset();
     D.quality.reset();
     D.header.reset();
+    D.nav.reset();
     lastVideo = null;
     lastSrc = '';
     lastSig = '';
+    lastCard = null;
+    lastPoster = '';
   }
 
   function boot() {
@@ -44,6 +49,7 @@
       teardown();
       return;
     }
+    D.nav.apply();
     D.header.apply();
     const v = D.playingVideo();
     if (v) {
@@ -64,6 +70,7 @@
       teardown();
       return;
     }
+    D.nav.apply();
     bootTimer = setTimeout(boot, 350);
   }
 
@@ -103,13 +110,25 @@
     if (v.paused) return;
     const now = Date.now();
     const sig = videoSig(v);
+    const card = cardOfVideo(v);
+    const poster = v.poster || '';
+
     if (sig) {
-      if (sig === lastSig) return;
+      // 标题指纹单独用会撞车：转载 / 同文案的连续两条视频标题完全一样。
+      // 补两个旁证：① 视频卡片元素换了；② 封面地址换了（同一视频换清晰度不会换封面）。
+      const cardChanged = !!(card && lastCard && card !== lastCard);
+      const posterChanged = !!(lastPoster && poster && poster !== lastPoster);
+      if (sig === lastSig && !cardChanged && !posterChanged) return;
       lastSig = sig;
+      lastCard = card;
+      if (poster) lastPoster = poster;
       D.gen++;
       lastGenAt = now;
       return;
     }
+
+    lastCard = card;
+    if (poster) lastPoster = poster;
     if (now - lastGenAt < 6000) return;
     D.gen++;
     lastGenAt = now;
@@ -163,6 +182,7 @@
   // ---------- 失焦自动暂停（不自动恢复） ----------
   function pauseActive() {
     if (!html.classList.contains('dyc-feed')) return;
+    if (!D.settings || D.settings.pause === false) return;
     if (document.hasFocus()) return;          // 只有整个窗口真的失去焦点才暂停
     const v = D.playingVideo();
     if (!v || v.paused || v.ended) return;

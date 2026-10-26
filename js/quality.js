@@ -1,4 +1,4 @@
-/* 自动最高清晰度 v1.5.0
+/* 自动最高清晰度 v1.6.1
  *
  * 实测结构（2026-10 抖音新版播放器，容器从 .xgplayer 更名为 .douyin-player，
  * 组件从 <xg-icon class="xgplayer-playclarity-setting"> 更名为
@@ -27,6 +27,8 @@
   if (!D) return;
 
   const R4K = 10;              // 4K 的档位分值
+  // popup 设置：关闭后不再调度、不再开档位菜单（正在进行的一轮会自行收尾）
+  const enabled = () => !D.settings || D.settings.quality !== false;
   let got4K = false;           // 【当前这条视频】已实测到 4K，本轮不再调整
   let timer = 0;
   let running = false;
@@ -231,7 +233,7 @@
 
   async function attempt(id, gen0) {
     // 早退时必须把排队标记清掉，否则这条视频再也排不上队
-    if (running || got4K || id !== job) { queuedGen = -1; return; }
+    if (!enabled() || running || got4K || id !== job) { queuedGen = -1; return; }
     if (gen0 !== qGen) { queuedGen = -1; return; }          // 视频已经换了，这一轮作废
     if (!document.documentElement.classList.contains('dyc-feed')) { queuedGen = -1; return; }
 
@@ -392,6 +394,7 @@
     // 两次评估之间至少隔 4 秒，避免同一条视频被反复点。
     schedule(video) {
       if (!(video instanceof HTMLVideoElement)) return;
+      if (!enabled()) return;
 
       // 换了视频：4K 闩锁和档位冷却都只对"那一条视频"有效，必须一起重置。
       // 以前 got4K 是整场会话一次性的 —— 只要有任何一条视频到过 4K，
@@ -434,6 +437,14 @@
         timer = 0;
         D.idle(() => attempt(id, gen0));
       }, wait);
+    },
+    applySettings() {
+      if (!enabled() || !document.documentElement.classList.contains('dyc-feed')) {
+        this.reset();
+        return;
+      }
+      const v = D.playingVideo();
+      if (v) this.schedule(v);
     },
     probe() {
       const v = D.playingVideo();

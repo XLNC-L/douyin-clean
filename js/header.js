@@ -69,6 +69,7 @@
   D.header = {
     apply() {
       reset();
+      if (!D.settings || D.settings.header === false) return false;
       if (!document.documentElement.classList.contains('dyc-feed')) return false;
 
       const cluster = findCluster();
@@ -110,6 +111,14 @@
 
       D.log('header: 顶栏保留入口', kept, '个，隐藏', hidden.length, '个');
       return true;
+    },
+
+    applySettings() {
+      if (!D.settings || D.settings.header === false) {
+        reset();
+        return;
+      }
+      this.apply();
     },
 
     reset,

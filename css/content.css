@@ -1,14 +1,20 @@
-/* 抖音净播 v1.6.0
+/* 抖音净播 v1.6.1
  * 全部视觉改动都在这一份静态 CSS 里完成：进入页面后运行时零成本。
  * 所有规则都以 html.dyc-feed 为前提，只在"刷视频"页面生效。
  * html.dyc-ui-on 由 JS 按鼠标状态切换：进入视频画面或在画面上移动即显示，
  * 停止移动 2 秒 / 移出画面 2 秒后移除，浮层随即淡出。
  */
 
-/* ========== 1. 左侧导航：整条隐藏（不做抽屉） ========== */
+/* ========== 1. 左侧导航 ========== */
 /* 只动抖音自己的左侧导航容器，不能写 aside —— 私信抽屉等右侧面板也是 aside，
- * 整类隐藏会把它们一起藏掉，表现为"点消息没反应"。 */
-html.dyc-feed #douyin-navigation {
+ * 整类隐藏会把它们一起藏掉，表现为"点消息没反应"。
+ * 1.6.1 起支持三种模式：整条隐藏（dyc-nav-hidden）/ 逐项保留（data-dyc-nav-hide）/ 保持原样。 */
+html.dyc-feed.dyc-nav-hidden #douyin-navigation {
+  display: none !important;
+}
+
+/* 逐项保留：JS 只给"要隐藏的入口行"打标记，保留项（例如「我的」）不受影响 */
+html.dyc-feed #douyin-navigation [data-dyc-nav-hide] {
   display: none !important;
 }
 
@@ -20,6 +26,7 @@ html.dyc-feed [data-e2e="feed-comment-icon"],
 html.dyc-feed [data-e2e="video-player-collect"],
 html.dyc-feed [data-e2e="video-player-share"],
 html.dyc-feed .xgplayer-controls,
+html.dyc-feed .douyin-player-controls,
 html.dyc-feed .slider-video [data-e2e*="avatar"],
 html.dyc-feed .slider-video [data-e2e*="follow"],
 html.dyc-feed .slider-video > *,
@@ -35,7 +42,7 @@ html.dyc-feed [data-dyc-ui] {
  *   ⑤ 底部播放控制条（含最右侧的省略号）——抖音自己要等 5~8 秒才收，这里统一到 2 秒；
  *   ⑥ JS 精确标记过的 [data-dyc-ui]。
  * 评论区是用户手动开关的，用 [data-e2e="comment-list"] 从①里排除掉。 */
-html.dyc-feed:not(.dyc-ui-on) .slider-video > *:not(:has(video)):not(:has([data-e2e="comment-list"])),
+html.dyc-feed:not(.dyc-ui-on) .slider-video > *:not(:has(video)):not(:has([data-e2e="comment-list"], [data-e2e*="comment-panel"], [class*="comment-list"], [class*="comment-panel"])),
 html.dyc-feed:not(.dyc-ui-on) .video-info-detail,
 html.dyc-feed:not(.dyc-ui-on) [data-e2e="video-player-digg"],
 html.dyc-feed:not(.dyc-ui-on) [data-e2e="feed-comment-icon"],
@@ -44,6 +51,7 @@ html.dyc-feed:not(.dyc-ui-on) [data-e2e="video-player-share"],
 html.dyc-feed:not(.dyc-ui-on) .slider-video :not([data-e2e*="comment"]) [data-e2e*="avatar"],
 html.dyc-feed:not(.dyc-ui-on) .slider-video :not([data-e2e*="comment"]) [data-e2e*="follow"],
 html.dyc-feed:not(.dyc-ui-on) .xgplayer-controls,
+html.dyc-feed:not(.dyc-ui-on) .douyin-player-controls,
 html.dyc-feed:not(.dyc-ui-on) [data-dyc-ui] {
   opacity: 0 !important;
   pointer-events: none !important;
