@@ -216,6 +216,49 @@
     }
   }
 
+  // 画面左下角的游戏卡片（例如「游戏 原神 · 评分高达9.3」）。
+  // 类名同样是哈希，按小尺寸 + 固定文案定位；标记后跟标题/互动栏一起显隐。
+  function markGame(v, vr) {
+    // 优先用整张活动卡：游戏卡片可能挂在播放器外层，cardOf 只到 .slider-video 会漏
+    const card = v.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"]') ||
+      cardOf(v, vr) || v.parentElement;
+    if (!card) return;
+
+    const near = el => {
+      const r = el.getBoundingClientRect();
+      if (r.width < 40 || r.height < 12 || r.width > 320 || r.height > 48) return null;
+      if (vr.width && !D.near(r, vr, 48)) return null;
+      if (el.closest('[data-e2e*="comment"], [class*="comment-list"], [class*="comment-panel"]')) return null;
+      if (el.closest('.video-info-detail, [data-e2e*="video-info"]')) return null;
+      return r;
+    };
+
+    // 1) 明确的 game anchor 语义（如果当前版本带这类标记）
+    let n = 0;
+    for (const el of card.querySelectorAll('[class*="game-anchor" i], [data-e2e*="game-anchor" i], [class*="gameAnchor" i]')) {
+      if (++n > 6) break;
+      if (near(el)) { mark(el); return; }
+    }
+
+    // 2) 按文案找小卡片；向上取到包含它的最大小容器，连图标一起藏
+    n = 0;
+    for (const el of card.querySelectorAll('div, span, a, section')) {
+      if (++n > 900) break;
+      if (!near(el)) continue;
+      const t = D.textOf(el);
+      if (!t || t.length > 48 || !/评分高达|^游戏.*评分/.test(t)) continue;
+      let box = el;
+      while (box.parentElement && box.parentElement !== card) {
+        const p = box.parentElement;
+        if (!near(p)) break;
+        if (!/评分高达|^游戏.*评分/.test(D.textOf(p))) break;
+        box = p;
+      }
+      mark(box);
+      return;
+    }
+  }
+
   function sync(video) {
     if (!enabled()) {
       clearTimeout(timer);
@@ -246,6 +289,7 @@
     markRail(vr);
     markOverlays(v, vr);
     markExtra(v, vr);
+    markGame(v, vr);
     // 新视频默认保持干净；但鼠标还在画面里时不要突然隐藏，
     // 否则会表现为"刚动一下就瞬间消失"，和 2 秒延迟的规则不一致。
     // 暂停的视频例外：切过去先立即收起一次。
