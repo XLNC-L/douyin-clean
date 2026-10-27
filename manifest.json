@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "抖音净播 · Douyin Clean",
-  "version": "1.9.5",
+  "version": "1.9.7",
   "description": "自动最高清晰度（含 4K）、带货广告与直播过滤、失焦暂停、纯净布局、视频底部进度条（可开关换色），并强制隐藏 AI 抖音入口。事件驱动实现，刷视频不卡顿。",
   "permissions": ["storage"],
   "host_permissions": ["https://www.douyin.com/*"],

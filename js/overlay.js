@@ -26,6 +26,10 @@
   let marked = [];
   let syncAt = 0;
   let raf = 0;
+  // 游戏卡 / 推荐卡是否已找到；tickLeft 限制每个视频最多补标几次
+  let gameDone = false;
+  let recDone = false;
+  let tickLeft = 6;
   let pending = null;
   let wasInside = false;      // 上一次判断时鼠标是否在视频画面内
   let rectAt = 0;             // currentRect 的取样时刻
@@ -70,25 +74,22 @@
       el.removeAttribute('data-dyc-instant');
     });
     marked = [];
-  }
-
-  // 始终隐藏的推广卡片（游戏卡片）：用 data-dyc-hide，不跟浮层显隐；
-  // 单独记录，扩展关闭/切页时能恢复。
-  let permanent = [];
-  function hidePermanent(el) {
-    if (!el || el.nodeType !== 1) return;
-    el.setAttribute('data-dyc-hide', '');
-    if (permanent.indexOf(el) === -1) permanent.push(el);
-  }
-  function clearPermanent() {
-    permanent.forEach(el => el.removeAttribute('data-dyc-hide'));
-    permanent = [];
+    gameDone = false;
+    recDone = false;
+    tickLeft = 6;
   }
 
   function mark(el) {
     if (!el || el.nodeType !== 1 || marked.indexOf(el) !== -1) return;
     el.setAttribute('data-dyc-ui', '');
     marked.push(el);
+  }
+
+  // 和标题 / 互动栏完全同步：去掉过渡，避免慢半拍
+  function markInstant(el) {
+    if (!el || el.nodeType !== 1) return;
+    el.setAttribute('data-dyc-instant', '');
+    mark(el);
   }
 
   // 视频真实所在的卡片（slider-video 那一层：宽高都比 video 略大一点）
@@ -254,8 +255,9 @@
     }
   }
 
-  // 画面左下角的游戏卡片（例如「游戏 原神 · 评分高达9.3」）。
-  // 类名同样是哈希，按小尺寸 + 固定文案定位；直接永久隐藏，避免跟着浮层切换时慢半拍。
+  // 画面左下角的游戏推广卡片（例如「游戏 原神 · 评分高达9.3」）。
+  // 类名全是哈希，所以用三种互相兜底的判据：语义类名（game*）→ 文案（评分/游戏）→ 尺寸+位置。
+  // 它必须跟标题 / 互动栏一起显隐（以前是直接永久隐藏，看起来就像"它不跟着一起动"）。
   function markGame(v, vr) {
     // 优先用整张活动卡：游戏卡片可能挂在播放器外层，cardOf 只到 .slider-video 会漏
     const card = v.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"]') ||
@@ -263,36 +265,52 @@
     if (!card) return;
 
     const near = el => {
-      const r = el.getBoundingClientRect();
-      if (r.width < 40 || r.height < 12 || r.width > 320 || r.height > 48) return null;
-      if (vr.width && !D.near(r, vr, 48)) return null;
+      if (!el || el.nodeType !== 1) return null;
       if (el.closest('[data-e2e*="comment"], [class*="comment-list"], [class*="comment-panel"]')) return null;
       if (el.closest('.video-info-detail, [data-e2e*="video-info"]')) return null;
+      const r = el.getBoundingClientRect();
+      if (r.width < 40 || r.height < 14 || r.width > 380 || r.height > 96) return null;
+      if (vr.width && !D.near(r, vr, 60)) return null;
+      // 只认画面左半边、下半部分：避开顶部的推荐入口和画面中央的按钮
+      if (vr.width && r.left > vr.left + vr.width * 0.55) return null;
+      if (vr.height && r.top < vr.top + vr.height * 0.4) return null;
       return r;
     };
 
-    // 1) 明确的 game anchor 语义（如果当前版本带这类标记）
+    // 向上收拢到"包含它的最大小容器"，连图标一起藏
+    const boxOf = el => {
+      let box = el;
+      while (box.parentElement && box.parentElement !== card) {
+        const p = box.parentElement;
+        if (!near(p)) break;
+        box = p;
+      }
+      return box;
+    };
+
+    // 1) 明确的 game 语义标记（新版 / 旧版都可能带）
     let n = 0;
-    for (const el of card.querySelectorAll('[class*="game-anchor" i], [data-e2e*="game-anchor" i], [class*="gameAnchor" i]')) {
-      if (++n > 6) break;
-      if (near(el)) { hidePermanent(el); return; }
+    for (const el of card.querySelectorAll('[class*="game" i], [data-e2e*="game" i]')) {
+      if (++n > 8) break;
+      if (!near(el)) continue;
+      markInstant(boxOf(el));
+      gameDone = true;
+      return;
     }
 
-    // 2) 按文案找小卡片；向上取到包含它的最大小容器，连图标一起藏
+    // 2) 按文案找小卡片
     n = 0;
     for (const el of card.querySelectorAll('div, span, a, section')) {
       if (++n > 900) break;
       if (!near(el)) continue;
       const t = D.textOf(el);
-      if (!t || t.length > 48 || !/评分高达|^游戏.*评分/.test(t)) continue;
-      let box = el;
-      while (box.parentElement && box.parentElement !== card) {
-        const p = box.parentElement;
-        if (!near(p)) break;
-        if (!/评分高达|^游戏.*评分/.test(D.textOf(p))) break;
-        box = p;
-      }
-      hidePermanent(box);
+      if (!t || t.length > 60) continue;
+      // 「评分」单独出现时容易撞上标题文案，必须同时带图标（游戏名称图标）才算
+      const hit = /评分高达/.test(t) || /^游戏/.test(t) || /秒玩/.test(t) ||
+        (/评分/.test(t) && !!el.querySelector('img, svg'));
+      if (!hit) continue;
+      markInstant(boxOf(el));
+      gameDone = true;
       return;
     }
   }
@@ -315,11 +333,6 @@
       return r;
     };
 
-    const instant = el => {
-      el.setAttribute('data-dyc-instant', '');
-      mark(el);
-    };
-
     let n = 0;
     for (const el of card.querySelectorAll('div, span, a, section')) {
       if (++n > 900) break;
@@ -334,7 +347,8 @@
         if (!/推荐$/.test(D.textOf(p))) break;
         box = p;
       }
-      instant(box);
+      markInstant(box);
+      recDone = true;
       return;
     }
   }
@@ -345,7 +359,6 @@
       timer = 0;
       if (!html.classList.contains('dyc-ui-on')) html.classList.add('dyc-ui-on');
       clearMarks();
-      clearPermanent();
       currentVideo = null;
       currentRect = null;
       return;
@@ -470,10 +483,23 @@
 
   D.overlay = {
     sync,
+    // 周期性补标（2 秒看门狗调用）：游戏卡 / 推荐卡经常比视频晚一步渲染，
+    // 只在换片时标记一次会漏；这里只扫左下角两类小卡片，开销极小。
+    tick() {
+      if (!enabled() || !html.classList.contains('dyc-feed')) return;
+      if (gameDone && recDone) return;      // 两类卡片都找到了，不再扫
+      if (tickLeft <= 0) return;            // 每个视频最多补标 6 次（约 12 秒）
+      tickLeft--;
+      const v = activeVideo() || currentVideo || D.playingVideo();
+      if (!v || !v.isConnected) return;
+      const vr = v.getBoundingClientRect();
+      if (!vr.width || !vr.height) return;
+      if (!gameDone) markGame(v, vr);
+      if (!recDone) markRecommend(v, vr);
+    },
     applySettings() {
       if (!html.classList.contains('dyc-feed')) {
         clearMarks();
-        clearPermanent();
         return;
       }
       if (!enabled()) {
@@ -481,7 +507,6 @@
         timer = 0;
         if (!html.classList.contains('dyc-ui-on')) html.classList.add('dyc-ui-on');
         clearMarks();
-        clearPermanent();
         currentVideo = null;
         currentRect = null;
         return;
@@ -494,7 +519,6 @@
     },
     reset() {
       clearMarks();
-      clearPermanent();
       hide();
       currentVideo = null;
       currentRect = null;
