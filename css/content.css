@@ -1,6 +1,7 @@
-/* 抖音净播 v1.9.5
+/* 抖音净播 v1.9.7
  * 全部视觉改动都在这一份静态 CSS 里完成：进入页面后运行时零成本。
- * 所有规则都以 html.dyc-feed 为前提，只在"刷视频"页面生效。
+ * 除左侧导航（dyc-nav-hidden / data-dyc-nav-hide）、顶栏精简（data-dyc-hide）外，
+ * 其余规则都以 html.dyc-feed 为前提，只在"刷视频"页面生效。
  * html.dyc-ui-on 由 JS 按鼠标状态切换：进入视频画面或在画面上移动即显示，
  * 停止移动 2 秒 / 移出画面 2 秒后移除，浮层随即淡出。
  */
@@ -9,18 +10,20 @@
 /* 只动抖音自己的左侧导航容器，不能写 aside —— 私信抽屉等右侧面板也是 aside，
  * 整类隐藏会把它们一起藏掉，表现为"点消息没反应"。
  * 1.6.1 起支持三种模式：整条隐藏（dyc-nav-hidden）/ 逐项保留（data-dyc-nav-hide）/ 保持原样。 */
-html.dyc-feed.dyc-nav-hidden #douyin-navigation {
+/* 左侧导航同样对所有页面生效（推荐 / 我的 / 收藏 / 搜索……），
+ * 所以这三条规则不能挂在 html.dyc-feed 上。 */
+html.dyc-nav-hidden #douyin-navigation {
   display: none !important;
 }
 
 /* 逐项保留：JS 只给"要隐藏的入口行"打标记，保留项（例如「我的」）不受影响 */
-html.dyc-feed #douyin-navigation [data-dyc-nav-hide] {
+html #douyin-navigation [data-dyc-nav-hide] {
   display: none !important;
 }
 
 /* 「AI 抖音」入口无条件隐藏：不参与逐项保留，三种导航模式下都不显示。
  * 用独立属性，避免 clearMarks() 清理逐项标记时把它一起摘掉。 */
-html.dyc-feed #douyin-navigation [data-dyc-nav-force] {
+html #douyin-navigation [data-dyc-nav-force] {
   display: none !important;
 }
 
@@ -77,7 +80,9 @@ html.dyc-feed:not(.dyc-ui-on) [data-dyc-ui] {
 }
 
 /* ========== 3. 顶栏多余图标 ========== */
-html.dyc-feed [data-dyc-hide] {
+/* 顶栏精简对所有页面生效（推荐 / 关注 / 朋友 / 搜索 / 个人主页……），
+ * 所以这条规则不能挂在 html.dyc-feed 上；标记由 header.js 维护，切页 / 关闭时都会清掉。 */
+html [data-dyc-hide] {
   display: none !important;
 }
 
@@ -147,10 +152,9 @@ html.dyc-feed.dyc-progress-on .dyc-progress[data-dyc-unknown] {
   display: none;
 }
 
-/* 没有 requestVideoFrameCallback 时的兜底：用线性过渡补上 timeupdate 之间的跳动 */
-html.dyc-feed.dyc-progress-on .dyc-progress[data-dyc-smooth] .dyc-progress-fill {
-  transition: transform .25s linear;
-}
+/* 注意：进度线的填充刻意不加 transition / animation。
+ * 任何基于时间的过渡都会让线条"自己匀速走"，与视频的实际倍速 / 快进脱节；
+ * 位置一律由 progress.js 直接写成当前 currentTime 对应的比例。 */
 
 /* ========== 6. 直播 / 广告 ========== */
 /* 不在这里做视觉处理：命中后由 JS 直接切下一条。

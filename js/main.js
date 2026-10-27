@@ -48,6 +48,9 @@
     clearTimeout(bootTimer);
     if (!html.classList.contains('dyc-feed')) {
       teardown();
+      // 左侧导航 / 顶栏精简不局限于视频流页面：我的、收藏、搜索等页面也保持一致
+      D.nav.apply();
+      D.header.apply();
       return;
     }
     D.nav.apply();
@@ -58,6 +61,7 @@
       D.overlay.sync(v);
       D.progress.attach(v);
     }
+    pauseOthers();
     retries = 0;
   }
 
@@ -70,9 +74,12 @@
     lastVideo = null;
     if (!shell) {
       teardown();
+      D.nav.apply();
+      D.header.apply();
       return;
     }
     D.nav.apply();
+    D.header.apply();
     bootTimer = setTimeout(boot, 350);
   }
 
@@ -141,6 +148,7 @@
     bumpGen(v);
     lastVideo = v;
     lastSrc = srcOf(v);
+    pauseOthers(v);               // 先掐掉上一条可能还在播的残留视频
     D.overlay.sync(v);
     D.progress.attach(v);
     D.filter.checkAd(v);
@@ -181,8 +189,45 @@
       // 播放器重渲染 / 暂停期间可能把自绘进度条清掉；这里只做幂等补挂，没有就重建
       if (D.progress) D.progress.sync(v);
     }
+    pauseOthers();                  // 兜住"上一条还在出声"：每秒级复核一次
+    if (D.overlay && D.overlay.tick) D.overlay.tick();  // 游戏 / 推荐卡片可能晚于视频渲染
     D.filter.closePopups(v);        // 顺手关掉头像旁的直播/推广小窗
   }, 2000);
+
+  // ---------- 同一时间只让一条视频出声 ----------
+  // 抖音划到下一条时偶尔不会把上一条暂停，表现为"新视频在播，但上一条的声音还在"。
+  // 这里只暂停"不是当前屏幕上这张卡片"的视频，正在看的那条完全不碰。
+  // 注意别反过来用 D.playingVideo()：残留在后台的旧视频也算"在播"，
+  // 会被误选成活动视频。判断顺序是"活动卡片里的视频 → 屏幕上面积最大的"。
+  function activeEl() {
+    const card = document.querySelector('[data-e2e="feed-active-video"]');
+    const v = card && card.querySelector('video');
+    if (v && v.isConnected) {
+      const r = v.getBoundingClientRect();
+      // 必须真的在视口里：滚动后旧卡片仍然有尺寸，只有"看着它"才算活动视频
+      const visible = r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight;
+      if (visible) return v;
+    }
+    return D.onScreenVideo ? D.onScreenVideo() : D.playingVideo();
+  }
+
+  const FEED_CARD_SEL = '[data-e2e="feed-item"], [data-e2e="feed-active-video"], .slider-video';
+
+  function pauseOthers(except) {
+    if (!html.classList.contains('dyc-feed')) return;
+    const list = document.querySelectorAll('video');
+    if (list.length < 2) return;
+    const active = activeEl();
+    if (!active) return;
+    for (const v of list) {
+      // except = 刚触发 playing 的那条：无论如何都不动它，
+      // 避免切换瞬间 feed-active-video 还没更新，把刚起播的新视频按停。
+      if (v === active || v === except || v.paused || v.ended) continue;
+      // 只处理视频流卡片里的视频：右侧的悬停预览等小播放器不要碰
+      if (!v.closest(FEED_CARD_SEL)) continue;
+      try { v.pause(); } catch (e) { /* 忽略 */ }
+    }
+  }
 
   // ---------- 失焦自动暂停（不自动恢复） ----------
   function pauseActive() {

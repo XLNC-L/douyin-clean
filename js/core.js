@@ -7,7 +7,7 @@
  *    只比对 <video> 引用与卡片文案指纹；导航逐项隐藏用的是 #douyin-navigation 内的
  *    局部 MutationObserver（custom / off 模式启用），不会观察整页；
  * 3) 刷视频的时机只来自媒体事件（loadedmetadata / play 捕获阶段），事件驱动；
- *    进度条用 requestVideoFrameCallback 逐帧更新，同样不是定时器；
+ *    进度条用 requestAnimationFrame 逐帧读 currentTime，同样不是定时器；
  * 4) 鼠标事件 passive，且每帧最多处理一次，只切换一个 class；
  * 5) 扫描类操作只在启动时做一次，并且有数量上限。
  */
@@ -15,7 +15,7 @@
   'use strict';
 
   const D = (window.__DYC = {
-    VER: '1.9.5',
+    VER: '1.9.7',
     debug: false,
 
     // 视频代次：每换一条视频 +1。
@@ -98,10 +98,81 @@
     return pool[0];
   };
 
+  // 屏幕上真正在播的那条：只认与视口相交的视频，取可见面积最大的。
+  // 抖音切视频时偶尔会留下上一条继续播放（甚至继续出声），而它在 DOM 里
+  // 仍有尺寸（只是滚出了视口）。用面积最大而不是"在播即算"，
+  // 才能稳定选中用户正在看的那条，避免进度条 / 音量判断被旧视频带走。
+  D.onScreenVideo = () => {
+    const all = Array.from(document.querySelectorAll('video'));
+    if (!all.length) return null;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const area = v => {
+      const r = v.getBoundingClientRect();
+      const w = Math.min(r.right, vw) - Math.max(r.left, 0);
+      const h = Math.min(r.bottom, vh) - Math.max(r.top, 0);
+      return (w > 0 && h > 0) ? w * h : 0;
+    };
+    const playing = all.filter(v => !v.paused && !v.ended && v.readyState >= 2);
+    const pool = playing.length ? playing : all;
+    let best = null;
+    let bestA = 0;
+    for (const v of pool) {
+      const a = area(v);
+      if (a > bestA) { bestA = a; best = v; }
+    }
+    return bestA > 40000 ? best : null;
+  };
+
   D.textOf = el => (el && el.textContent ? el.textContent.replace(/\s+/g, '').trim() : '');
 
   // 两个矩形是否相邻/相交（pad 为额外容差）
   D.near = (a, b, pad = 40) => !!a && !!b &&
     a.left < b.right + pad && a.right > b.left - pad &&
     a.top < b.bottom + pad && a.bottom > b.top - pad;
+
+  // 一键诊断：控制台执行 __DYC.diag() 会返回当前所有 <video> 与自绘进度条的真实状态。
+  // 用于定位"进度线不跟快进 / 倍速"这类只能在真机上复现的问题（谁在播、谁是活动卡片、
+  // 线条挂在哪、填充值是多少、时长是否有效）。
+  D.diag = () => {
+    const num = n => (isFinite(n) ? Math.round(n * 100) / 100 : String(n));
+    const videos = Array.from(document.querySelectorAll('video')).map((v, i) => {
+      const r = v.getBoundingClientRect();
+      let seekableEnd = null;
+      try { seekableEnd = v.seekable.length ? v.seekable.end(v.seekable.length - 1) : null; } catch (e) { /* 忽略 */ }
+      const root = v.closest('.xgplayer, .douyin-player');
+      return {
+        '#': i,
+        paused: v.paused,
+        ended: v.ended,
+        currentTime: num(v.currentTime),
+        duration: isFinite(v.duration) ? num(v.duration) : String(v.duration),
+        rate: v.playbackRate,
+        seekableEnd: seekableEnd === null ? null : num(seekableEnd),
+        rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
+        player: root ? String(root.className).slice(0, 48) : null,
+        inActiveCard: !!v.closest('[data-e2e="feed-active-video"]'),
+        inFeedItem: !!v.closest('[data-e2e="feed-item"], .slider-video')
+      };
+    });
+    const bars = Array.from(document.querySelectorAll('.dyc-progress')).map(b => {
+      const cs = getComputedStyle(b);
+      const f = b.querySelector('.dyc-progress-fill');
+      const r = b.getBoundingClientRect();
+      return {
+        fill: f ? f.style.transform : null,
+        display: cs.display,
+        opacity: cs.opacity,
+        unknown: b.hasAttribute('data-dyc-unknown'),
+        rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]
+      };
+    });
+    return {
+      href: location.href,
+      htmlClass: document.documentElement.className,
+      videos,
+      bars,
+      probe: D.progress ? D.progress.probe() : null
+    };
+  };
 })();
