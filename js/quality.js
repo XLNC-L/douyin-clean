@@ -397,6 +397,7 @@
       if (!enabled()) return;
       // 私信 / 好友分享弹层里的播放器不调清晰度，避免误开背后信息流的档位菜单
       if (!D.inFeed(video)) return;
+      if (D.overlayContext()) return;
 
       // 换了视频：4K 闩锁和档位冷却都只对"那一条视频"有效，必须一起重置。
       // 以前 got4K 是整场会话一次性的 —— 只要有任何一条视频到过 4K，

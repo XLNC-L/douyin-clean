@@ -149,7 +149,17 @@
     // 以前会当成换了一条信息流视频，广告判定可能点到背后的「下一条」箭头，
     // 表现为"点开好友视频，原来的视频不暂停，反而滑到下一条"。
     if (!D.inFeed(v)) {
-      if (!v.paused) pauseFeed(v);
+      // 小尺寸悬停预览不改变信息流；只有真正的前台弹层才接管
+      if (D.imOpen() || D.foreignForeground() === v) {
+        lastVideo = v;
+        if (!v.paused) pauseFeed(v);
+      }
+      return;
+    }
+    // 私信抽屉打开时，前台是好友视频：信息流只负责暂停，不做过滤 / 清晰度 / 浮层
+    if (D.imOpen()) {
+      lastVideo = v;          // 让后面的 pauseOthers 知道这条是新前台，别把它按停
+      pauseFeed(v);
       return;
     }
     bumpGen(v);
@@ -189,16 +199,19 @@
   setInterval(() => {
     if (document.hidden) return;
     if (!html.classList.contains('dyc-feed')) return;
+    const ctx = D.overlayContext();
     const v = D.playingVideo();
     if (v) {
       const sig = v.paused ? '' : videoSig(v);
       if (v !== lastVideo || (sig && sig !== lastSig)) onNewVideo(v);
       // 播放器重渲染 / 暂停期间可能把自绘进度条清掉；这里只做幂等补挂，没有就重建
-      if (D.progress && D.inFeed(v)) D.progress.sync(v);
+      if (D.progress && D.inFeed(v) && !ctx) D.progress.sync(v);
     }
     pauseOthers();                  // 兜住"上一条还在出声"：每秒级复核一次
-    if (D.overlay && D.overlay.tick) D.overlay.tick();  // 游戏 / 推荐卡片可能晚于视频渲染
-    if (v && D.inFeed(v)) D.filter.closePopups(v);      // 弹层在前台时别去关它里面的按钮
+    if (!ctx) {
+      if (D.overlay && D.overlay.tick) D.overlay.tick();  // 游戏 / 推荐卡片可能晚于视频渲染
+      if (v && D.inFeed(v)) D.filter.closePopups(v);      // 弹层在前台时别去关它里面的按钮
+    }
   }, 2000);
 
   // ---------- 同一时间只让一条视频出声 ----------
@@ -231,17 +244,24 @@
 
   function pauseOthers(except) {
     if (!html.classList.contains('dyc-feed')) return;
-    // 私信 / 分享弹层里的视频在前台时：信息流后台视频全部暂停，
-    // 但不要把弹层自己的视频当成"残留视频"按停。
-    const fg = D.onScreenVideo ? D.onScreenVideo() : null;
-    if (fg && !D.inFeed(fg) && !fg.paused) {
-      pauseFeed(fg);
+    // 好友视频 / 私信抽屉在前台：只暂停背后的信息流，绝不碰前台视频
+    if (D.overlayContext()) {
+      // 前台可能是 aside 里的弹层视频，也可能是刚点开的那条信息流卡片；
+      // 两种都要跳过，不能把它当残留视频按停。
+      const keep = D.foreignForeground() ||
+        ((lastVideo && lastVideo.isConnected) ? lastVideo : null);
+      pauseFeed(keep);
       return;
     }
     const list = document.querySelectorAll('video');
     if (list.length < 2) return;
-    const active = activeEl();
-    if (!active || !D.inFeed(active)) return;
+    // 用户刚点开 / 刚起播的那条优先当活动视频：否则 feed-active-video 还指着旧卡片，
+    // 会把新打开的好友视频当成"残留视频"按停（表现就是好友视频自动暂停）。
+    const recent = lastVideo;
+    const rr = recent && recent.isConnected ? recent.getBoundingClientRect() : null;
+    const recentVisible = !!(rr && rr.width > 0 && rr.height > 0 && rr.bottom > 0 && rr.top < window.innerHeight && !recent.paused);
+    const active = recentVisible ? recent : activeEl();
+    if (!active) return;
     for (const v of list) {
       // except = 刚触发 playing 的那条：无论如何都不动它，
       // 避免切换瞬间 feed-active-video 还没更新，把刚起播的新视频按停。

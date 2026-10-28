@@ -239,6 +239,8 @@
   // blocked 一置真就再也不试，于是那条带货视频会一直播下去。
   function next(video, depth) {
     const d = depth || 0;
+    // 私信 / 好友视频前台时不切走信息流；已排队的重试也要停
+    if (D.overlayContext()) return;
     // 节流只作用于"首次尝试"，复核后的重试与降级递归必须能继续执行
     if (d === 0) {
       const now = Date.now();
@@ -281,6 +283,8 @@
     if (!(video instanceof HTMLVideoElement)) return;
     // 私信 / 好友分享弹层里的视频不是信息流视频：不判定、不点「下一条」
     if (!D.inFeed(video)) return;
+    // 私信抽屉 / 好友视频在前台时，背后的信息流一律不自动跳过
+    if (D.overlayContext()) return;
     if (!enabled() && !liveEnabled()) return;
     if (!document.documentElement.classList.contains('dyc-feed')) return;
     if (!video.isConnected) return;

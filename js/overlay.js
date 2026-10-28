@@ -435,6 +435,8 @@
 
     const v = video || D.playingVideo();
     if (!v || !D.inFeed(v)) return;
+    // 好友视频 / 私信抽屉在前台：信息流浮层保持现状，别去标记弹层里的元素
+    if (D.overlayContext()) return;
     const vr = v.getBoundingClientRect();
     if (!vr.width || !vr.height) return;
 
@@ -556,6 +558,7 @@
     // 只在换片时标记一次会漏；这里只扫左下角两类小卡片，开销极小。
     tick() {
       if (!enabled() || !html.classList.contains('dyc-feed')) return;
+      if (D.overlayContext()) return;
       if (gameDone && recDone && badgeDone) return;  // 两类卡片与推荐标签都找到了，不再扫
       if (tickLeft <= 0) return;            // 每个视频最多补标 6 次（约 12 秒）
       tickLeft--;
