@@ -78,6 +78,9 @@
     clearTimeout(bootTimer);
     if (!html.classList.contains('dyc-feed')) {
       teardown();
+      // 左侧导航 / 顶栏精简不局限于刷视频页面：我的、收藏、搜索等页面也保持一致
+      D.nav.apply();
+      D.header.apply();
       return;
     }
     D.nav.apply();
@@ -103,6 +106,8 @@
     lastVideo = null;
     if (!shell) {
       teardown();
+      D.nav.apply();
+      D.header.apply();
       return;
     }
     D.nav.apply();

@@ -6,6 +6,25 @@
 > `1.4.x` 与 `1.5.x` 是本地迭代版本，未单独发布 Release，其改动已并入 `1.6.0`。
 > `1.6.2` ~ `1.6.4` 同样是本地迭代版本，未单独发布 Release，其改动已并入 `1.7.0`。
 
+## [1.9.15] - 2026-10-28
+
+### 修复
+
+- **左侧导航 / 顶栏精简在非刷视频页面失效**：这两条规则以前都以 `html.dyc-feed` 为前提，JS 也只在刷视频路由调用 `nav.apply()` / `header.apply()`。一进「我的 / 收藏 / 搜索 / 详情页」侧栏整条回来、顶栏图标也恢复。现在：
+  - CSS 去掉 `html.dyc-feed` 前缀（`dyc-nav-hidden`、`data-dyc-nav-hide`、`data-dyc-nav-force`、`data-dyc-hide`）；
+  - `nav.apply()` / `header.apply()` 去掉 dyc-feed 门槛；
+  - `main.js` 在非刷视频路由的 `boot()` / `onRoute()` 里也会应用；
+  - `settings.js` 在 document_start 就挂上 `dyc-nav-hidden`（全站），避免先闪一下完整侧栏。
+- **顶栏图标组定位改为语义优先**：以前只认"右上角圆形头像"，未登录 / 头像未渲染时 `findCluster()` 返回 null，顶栏精简直接不生效。现在优先用 `[data-e2e="im-entry"]` / `[data-e2e="notice-entry"]` 向上找图标组，找不到才退回头像法。
+
+### 验证
+
+真机（`/user/self` 个人主页）：`#douyin-navigation` 计算样式 `display: none`，顶栏隐藏「充钻石 / 客户端 / 壁纸 / 投稿」4 项；刷视频页面回归 8/8、Infinity 场景 4/4、mock 26/26 均通过。
+
+### 工程
+
+- 版本号统一到 `1.9.15`。
+
 ## [1.9.14] - 2026-10-28
 
 真机 dump 出播放器进度条的真实结构后，定位到"进度条不跟 seek"的真凶。

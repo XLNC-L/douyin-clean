@@ -49,8 +49,25 @@
     return /%|px/.test(radius) && parseFloat(radius) >= 12;
   }
 
-  // 从右上角"头像"往上找图标组容器
+  // 顶栏右侧的图标组容器。
+  // ① 优先按语义标记定位：顶栏的「通知 / 消息」入口一定在图标组里，
+  //    比"找一个圆形头像"可靠得多 —— 未登录时根本没有头像，旧逻辑会直接放弃。
+  // ② 找不到时退回原来的"从右上角圆形头像往上找"。
   function findCluster() {
+    for (const sel of ['[data-e2e="im-entry"]', '[data-e2e="notice-entry"]']) {
+      const anchor = document.querySelector(sel);
+      if (!anchor) continue;
+      let best = null;
+      let node = anchor.parentElement;
+      for (let i = 0; i < 6 && node && node !== document.body; i++, node = node.parentElement) {
+        const r = node.getBoundingClientRect();
+        if (!(r.height > 0 && r.height < 80 && r.top < 96)) break;
+        if (r.width > 0 && r.width < 460) best = node;
+        else break;
+      }
+      if (best && best.children.length >= 3) return best;
+    }
+
     const vw = window.innerWidth;
     const imgs = document.querySelectorAll('img');
     let anchor = null;
@@ -152,7 +169,7 @@
     apply() {
       reset();
       if (modeOf() === 'off') return false;
-      if (!document.documentElement.classList.contains('dyc-feed')) return false;
+      // 顶栏精简同样全站生效（我的 / 收藏 / 搜索等页面），不再限定刷视频页面
 
       const cluster = findCluster();
       if (!cluster) return false;

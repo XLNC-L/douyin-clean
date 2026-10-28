@@ -218,11 +218,8 @@
   D.nav = {
     apply() {
       const nav = navOf();
-      if (!document.documentElement.classList.contains('dyc-feed')) {
-        clearMarks();
-        clearForced();
-        return;
-      }
+      // 导航精简是全站生效的（我的 / 收藏 / 搜索 / 详情页都保持一致），
+      // 不再要求 html.dyc-feed —— 只在刷视频页面生效会表现为"换个页面侧栏又出来了"。
       const hidden = fullHidden();
       document.documentElement.classList.toggle('dyc-nav-hidden', hidden);
       clearMarks();
