@@ -74,31 +74,65 @@
   // 一帧的开销是两次属性读取，远小于一次样式计算。
   function loop() {
     rafId = 0;
-    if (!bar || !video || !enabled()) return;
-    if (!document.hidden) paint();
-    followActive();
+    if (!enabled() || !html.classList.contains('dyc-feed')) return;
+    retarget();                        // 每 120ms 确认一次"线条该挂在哪条视频上"
+    if (bar && video && !document.hidden) paint();
     if (!rafId) rafId = requestAnimationFrame(loop);
   }
 
   function startLoop() {
-    if (rafId || !bar || !video || !enabled()) return;
+    if (rafId || !enabled()) return;
     rafId = requestAnimationFrame(loop);
   }
 
-  // 线条必须跟着"当前屏幕上这张卡片"的视频。抖音切视频时会留下上一条继续播放的旧视频，
-  // 若线条挂在它身上，表现就是"画面已经切走了，线条还按上一套时间在走"。
-  // 这里只做最保守的纠正：当前目标已经不在 DOM 里 / 尺寸为 0 时才换，避免抢走暂停中的那条。
-  function followActive() {
-    if (!video) return;
+  // 开关类与颜色：settings 是异步读出来的，这里每次都补一遍（幂等，代价可忽略）
+  function ensureStyle() {
+    if (!html.classList.contains(ON_CLASS)) html.classList.add(ON_CLASS);
+    if (html.style.getPropertyValue('--dyc-progress-color') !== colorOf()) paintColor();
+  }
+
+  // 活动卡片里的视频（真正贴在屏幕上的那张卡片）
+  function activeCardVideo() {
+    const active = document.querySelector('[data-e2e="feed-active-video"]');
+    const v = active && active.querySelector('video');
+    return (v && v.isConnected) ? v : null;
+  }
+
+  // 线条最该跟的那条视频：优先"在播 + 在视口里"，其次才是活动卡片。
+  // 抖音换片时会留下上一条继续播放的旧视频，也会把相邻视频预加载在 DOM 里；
+  // 只按"活动卡片"挑，很容易挑到已经换走的那条 —— 表现就是
+  // "刚打开时前几条正常，之后线条全部不动 / 不跟快进"。
+  function bestTarget() {
+    const cands = [];
+    const playing = D.playingVideo();
+    if (playing && playing.isConnected && D.visibleArea(playing) > 0) cands.push(playing);
+    const active = activeCardVideo();
+    if (active && active !== playing && D.visibleArea(active) > 0) cands.push(active);
+    if (!cands.length) return null;
+    // 在播的优先；都在播（或都暂停）时取可见面积大的
+    cands.sort((a, b) => {
+      const pa = (a.paused || a.ended) ? 0 : 1;
+      const pb = (b.paused || b.ended) ? 0 : 1;
+      if (pa !== pb) return pb - pa;
+      return D.visibleArea(b) - D.visibleArea(a);
+    });
+    return cands[0];
+  }
+
+  // 每 120ms 复核一次目标：换了视频、或者我们的节点被播放器重渲染清掉，
+  // 就立刻改挂并补一帧。这条是"前几条之后全部失效"的根因修复 ——
+  // 抖音后面会换新的 <video> 元素，旧元素还留在 DOM 里但已经不在播，
+  // 线条若继续挂在它身上就永远不动。
+  function retarget() {
     const now = performance.now();
-    if (now - idAt < 1000) return;
+    if (now - idAt < 120) return;
     idAt = now;
-    if (video.isConnected && D.visibleArea(video) > 0) return;
-    const next = visibleVideo(null);
-    if (!next || next === video) return;
+    const next = bestTarget();
+    if (!next) return;
+    if (next === video && bar && bar.isConnected) return;
+    ensureStyle();
     if (!ensure(next)) return;
     paint(true);
-    startLoop();
   }
 
   function setUnknown(flag) {
@@ -263,20 +297,14 @@
     fill = null;
   }
 
-  // 预加载的相邻视频也会触发媒体事件 / 被 main.js 传进来。
-  // 进度条只应该挂在"当前屏幕上这张卡片"的视频上；优先用 feed-active-video，
-  // 没有再退回传进来的视频 / 当前在播视频。
-  function visibleVideo(v) {
-    const active = document.querySelector('[data-e2e="feed-active-video"]');
-    const activeVideo = active && active.querySelector('video');
-    const pool = [activeVideo, v, D.playingVideo()].filter(Boolean);
-    for (const c of pool) {
-      if (D.visibleArea(c) > 0 && D.inFeedCard(c)) return c;
-    }
-    for (const c of pool) {
-      if (D.visibleArea(c) > 0) return c;
-    }
-    return pool[0] || null;
+  // 挂载目标：先按"在播 + 视口内"挑（bestTarget），挑不到再退回传进来的视频。
+  // 不能只认 feed-active-video —— 抖音后面的卡片会换新的 <video> 元素，
+  // 活动卡片属性更新滞后时就会一直挂在已经换走的那条上。
+  function targetVideo(v) {
+    const best = bestTarget();
+    if (best) return best;
+    if (v && v.isConnected && D.visibleArea(v) > 0) return v;
+    return null;
   }
 
   function attach(v) {
@@ -286,12 +314,8 @@
     }
     // 聊天 / 弹层里的播放器不挂线条
     if (v && D.isOverlayVideo(v)) return;
-    // 不依赖 settings 的异步回调：storage 不可用 / 回调早于本模块加载时，
-    // 这里补一次开关类，保证第一次挂载就有样式。
-    if (!html.classList.contains(ON_CLASS)) html.classList.add(ON_CLASS);
-    // 同理补颜色变量；值相同就跳过，避免每次换片都让整页样式失效。
-    if (html.style.getPropertyValue('--dyc-progress-color') !== colorOf()) paintColor();
-    const target = visibleVideo(v);
+    ensureStyle();
+    const target = targetVideo(v);
     if (!target) return;
     if (!ensure(target)) return;
     paint(true);
@@ -313,10 +337,13 @@
       if (D.isOverlayVideo(v)) return;
 
       if (v !== video) {
-        // 预加载的相邻视频处于暂停状态，不抢当前画面
-        if (v.paused) return;
-        if (D.playingVideo() !== v) return;
-        attach(v);
+        // 目标由 retarget() 每 120ms 复核；这里只对"当前最该跟的那条"做即时接管，
+        // 避免残留的旧视频一触发事件就把线条抢走。
+        if (v.paused || D.visibleArea(v) <= 0) return;
+        if (bestTarget() !== v) return;
+        ensureStyle();
+        if (!ensure(v)) return;
+        paint(true);
         return;
       }
 
@@ -377,21 +404,19 @@
     sync(v) {
       if (!enabled() || !html.classList.contains('dyc-feed')) return;
       if (v && D.isOverlayVideo(v)) return;
-      const target = visibleVideo(v);
-      if (!target) return;
       // 先补开关类和颜色，防止设置回调/重渲染把样式丢了却被下面的幂等判断直接放行
-      if (!html.classList.contains(ON_CLASS)) html.classList.add(ON_CLASS);
-      if (html.style.getPropertyValue('--dyc-progress-color') !== colorOf()) paintColor();
+      ensureStyle();
+      // 循环万一因为异常 / 页面切换断掉，这里顺手拉起来（看门狗每 2 秒调一次）
+      startLoop();
+      const target = targetVideo(v);
+      if (!target) return;
       const nextHost = target.closest('.xgplayer, .douyin-player') || target.parentElement;
       if (video === target && host === nextHost && bar && bar.isConnected) {
         paint();                 // 顺带补一帧：暂停时也能把最新位置画出来
         return;
       }
-      // 这里不用 attach()：暂停时 attach 会退回 D.playingVideo()，可能挂到别的预加载卡片上；
-      // 看门狗 / 显示切换传进来的就是当前视频，直接挂它。
       if (!ensure(target)) return;
       paint(true);
-      startLoop();
     },
     applySettings() {
       paintColor();
@@ -405,15 +430,26 @@
     },
     probe() {
       const d = video ? video.duration : NaN;
+      const best = bestTarget();
       return {
         启用: enabled(),
         线条: !!(bar && bar.isConnected),
         循环: !!rafId,
-        暂停: video ? video.paused : null,
-        拖动中: video ? video.seeking : null,
-        当前时间: video && isFinite(video.currentTime) ? Math.round(video.currentTime * 10) / 10 : null,
-        时长: isFinite(d) ? Math.round(d * 10) / 10 : (isFinite(effDur) ? '兜底 ' + Math.round(effDur * 10) / 10 : null),
-        倍速: video ? video.playbackRate : null,
+        挂载: video ? {
+          连接: video.isConnected,
+          可见面积: Math.round(D.visibleArea(video)),
+          在播: !video.paused,
+          当前时间: isFinite(video.currentTime) ? Math.round(video.currentTime * 10) / 10 : null,
+          时长: isFinite(d) ? Math.round(d * 10) / 10 : (isFinite(effDur) ? '兜底 ' + Math.round(effDur * 10) / 10 : null),
+          倍速: video.playbackRate,
+          宿主: host ? String(host.className).slice(0, 40) : null
+        } : null,
+        应挂: best ? {
+          同一条: best === video,
+          可见面积: Math.round(D.visibleArea(best)),
+          在播: !best.paused,
+          当前时间: isFinite(best.currentTime) ? Math.round(best.currentTime * 10) / 10 : null
+        } : null,
         进度: (video && lastPct >= 0) ? Math.round(lastPct * 1000) / 10 + '%' : null
       };
     },
