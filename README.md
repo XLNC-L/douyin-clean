@@ -5,11 +5,16 @@
 ![manifest](https://img.shields.io/badge/Manifest-V3-4285F4)
 ![platform](https://img.shields.io/badge/Chrome-Desktop-34A853)
 
-当前版本：v1.9.14 · [下载 / Releases](https://github.com/XLNC-L/douyin-clean/releases) · [更新日志](CHANGELOG.md)
+当前版本：v1.9.15 · [下载 / Releases](https://github.com/XLNC-L/douyin-clean/releases) · [更新日志](CHANGELOG.md)
 
 ![界面示意：左为默认界面，右为启用扩展后](docs/preview.svg)
 
 一个针对**网页版抖音**（`www.douyin.com`）的 Chrome 扩展：**自动最高清晰度**、**带货广告自动跳过**、**失焦暂停**、**纯净布局**、**视频底部进度细线**，所有功能都能在扩展面板里分项开关。不做列表轮询、不全站监听、不删 DOM 节点 —— 刷视频不卡。
+
+## 最新变化（v1.9.15）
+
+- **左侧导航 / 顶栏精简改为全站生效**：以前这两条 CSS 规则挂在 `html.dyc-feed` 下、JS 也只在刷视频页面调用，所以一进「我的 / 收藏 / 搜索 / 详情页」侧栏又整条冒出来、顶栏图标也回来了。现在导航（`dyc-nav-hidden` / `data-dyc-nav-hide`）与顶栏（`data-dyc-hide`）不再限定页面，路由切换时也会重新应用；
+- **顶栏图标组定位更可靠**：以前靠"右上角圆形头像"反推图标组，未登录 / 头像还没渲染时直接放弃。现在优先用顶栏的「通知 / 消息」语义标记定位，真机在个人主页验证可正常隐藏「充钻石 / 客户端 / 壁纸 / 投稿」等。
 
 ## 最新变化（v1.9.14）
 

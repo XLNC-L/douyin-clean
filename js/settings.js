@@ -25,8 +25,9 @@
   const html = document.documentElement;
 
   // 先用默认值挂上「整条隐藏」，document_start 时导航还没解析出来，不会闪。
+  // 全站生效（不只是刷视频页面），否则切到「我的 / 收藏」会先看到完整侧栏再消失。
   // 读取到用户设置后若为 custom / off，再把这个 class 摘掉。
-  if (D.isShell()) html.classList.add('dyc-nav-hidden');
+  html.classList.add('dyc-nav-hidden');
 
   function apply() {
     const keep = D.settings.nav.keep || [];
