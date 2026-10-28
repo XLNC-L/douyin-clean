@@ -147,11 +147,6 @@ html.dyc-feed.dyc-progress-on .dyc-progress[data-dyc-unknown] {
   display: none;
 }
 
-/* 没有 requestVideoFrameCallback 时的兜底：用线性过渡补上 timeupdate 之间的跳动 */
-html.dyc-feed.dyc-progress-on .dyc-progress[data-dyc-smooth] .dyc-progress-fill {
-  transition: transform .25s linear;
-}
-
 /* ========== 6. 直播 / 广告 ========== */
 /* 不在这里做视觉处理：命中后由 JS 直接切下一条。
  * 删除卡片节点会破坏抖音的滚动吸附与虚拟列表，那才是刷视频卡顿的根源。 */

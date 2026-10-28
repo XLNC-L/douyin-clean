@@ -3,21 +3,25 @@
  * 位置：把一条 3px 细线挂进播放器根节点（.xgplayer / .douyin-player），absolute 贴底。
  * 播放器缩放、开评论区、全屏时都会跟着走，不需要读几何、不需要跟随 resize。
  *
- * 性能：进度更新只有两个来源，都不轮询：
- *   1) requestVideoFrameCallback —— 每呈现一帧回调一次，画面如何走线条就如何走；
- *   2) timeupdate（约 4Hz）—— 兜底，配 CSS 线性过渡补齐中间帧。
- * 每次只写 fill 的 transform: scaleX()（合成层动画，不触发重排），并按万分之一取整去重，
- * 暂停 / 卡顿时不会空写。颜色通过根节点上的 --dyc-progress-color 变量下发，
- * 开关与换色各写一次样式，播放过程中不读也不写样式表。
+ * 更新方式（v1.9.11 重做，合并上一版"逐帧读 currentTime"的做法）：
+ *   requestAnimationFrame 循环 —— 只要视频在播 / 在 seek / 刚 seek 完，就每帧读一次
+ *   video.currentTime 写 transform: scaleX()。这是唯一驱动，不再依赖
+ *   requestVideoFrameCallback：rVFC 只在"有新画面呈现"时回调，拖动进度条、跳转、
+ *   切清晰度、页面不可见时都可能长时间不回调，回调链一断线条就只剩 4Hz 的 timeupdate，
+ *   看起来就是"只会匀速走、快进快退和跳转都没反应"。
+ *   媒体事件（timeupdate / seeking / seeked / ended / ratechange …）仍然保留，
+ *   用于即时对齐和兜底，事件与循环写的是同一个 paint()。
  *
- * 三个容易翻车的点（v1.9.11 重做）：
+ * 每帧只读 currentTime（纯内存属性，不触发重排）、只写 fill 的 transform，
+ * 并按万分之一取整去重，暂停 / 卡顿时不会空写。颜色通过根节点上的
+ * --dyc-progress-color 变量下发，播放过程中不读也不写样式表。
+ *
+ * 另外三个容易翻车的点：
  *   · 播完"从头播放"不稳定：抖音可能是 loop 属性，也可能是 JS 里 seek 回 0，
- *     后者不保证触发 play / seeking；rVFC 在 ended 状态下也不会再回调。
- *     所以 ended 之后补三次兜底重画，并在 currentTime 变小时强制重画；
- *   · 逐帧回调会"丢"：rVFC 在暂停 / 播完 / 页面不可见时不回调，frameCb 一旦占住就再也排不上，
- *     线条只剩 4Hz 的 timeupdate。这里用轮次号 + 700ms 超时自愈；
- *   · 快进快退 / 跳转：seek 期间视频常常是暂停的，rVFC 不回调，
- *     所以 seeking 时用 rAF 补 1.2 秒，seeked 后再强制对齐一次。
+ *     后者不保证触发 play / seeking。ended 之后补三次兜底重画，currentTime 变小时也强制重画；
+ *   · 拖动进度条时视频常常是暂停的：seeking 之后留 1.2 秒"跟随窗口"，
+ *     这期间循环继续跑，松手前的每一帧都能跟上；
+ *   · 线条挂错视频：每秒复核一次，目标视频被换掉 / 移出 DOM 时改挂当前活动卡片。
  *
  * 直播 / duration 未知（MSE 流）时整条隐藏：这类视频没有可用的播放进度。
  */
@@ -28,23 +32,16 @@
   const html = document.documentElement;
   const ON_CLASS = 'dyc-progress-on';
   const ATTR_UNKNOWN = 'data-dyc-unknown';
-  const ATTR_SMOOTH = 'data-dyc-smooth';
-
-  // 支持逐帧回调时不要 CSS 过渡，否则线条会永远慢半拍；
-  // 只有退回 timeupdate 时才用过渡把 4Hz 的跳动补顺。
-  const hasRVFC = typeof HTMLVideoElement !== 'undefined' &&
-    typeof HTMLVideoElement.prototype.requestVideoFrameCallback === 'function';
 
   let bar = null;
   let fill = null;
   let host = null;
   let video = null;
-  let frameCb = 0;
-  let frameSeq = 0;         // 逐帧回调的轮次：迟到的旧回调靠它作废
-  let frameAt = 0;          // 上次排帧的时刻：用来识别"回调再也不会来"
+  let rafId = 0;
+  let seekUntil = 0;        // seek 跟随窗口的截止时刻
   let lastPct = -1;
   let lastTime = -1;        // 上次画线时的 currentTime：用来发现"回到开头 / 往回拖"
-  let seekRaf = 0;          // 拖动进度条期间的补帧
+  let idAt = 0;             // 目标视频复核时刻
   let endedTimers = [];     // 播放结束后的兜底重画
   let unknown = null;       // null=尚未判定；true/false=当前线条是否因时长未知而隐藏
   let effDur = NaN;         // 有效时长（duration 不是有限值时的兜底）
@@ -62,25 +59,49 @@
     html.style.setProperty('--dyc-progress-color', colorOf());
   }
 
-  function cancelFrame() {
-    frameSeq++;                 // 让还没回来的旧回调作废
-    if (!frameCb) return;
-    const v = video;
-    if (v && typeof v.cancelVideoFrameCallback === 'function') {
-      try { v.cancelVideoFrameCallback(frameCb); } catch (e) { /* 忽略 */ }
-    }
-    frameCb = 0;
+  // ---------- 逐帧循环 ----------
+  function stopLoop() {
+    if (!rafId) return;
+    cancelAnimationFrame(rafId);
+    rafId = 0;
   }
 
-  function stopSeekBurst() {
-    if (!seekRaf) return;
-    cancelAnimationFrame(seekRaf);
-    seekRaf = 0;
+  // 什么时候还需要继续排帧：
+  //   在播（含倍速）→ 要跟；正在 seek → 要跟；刚 seek 完 1.2 秒内 → 继续跟。
+  function keepLooping() {
+    if (!video || !bar) return false;
+    if (!video.paused && !video.ended) return true;
+    if (video.seeking) return true;
+    return performance.now() < seekUntil;
   }
 
-  function clearEnded() {
-    endedTimers.forEach(clearTimeout);
-    endedTimers = [];
+  function loop() {
+    rafId = 0;
+    if (!bar || !video || !enabled()) return;
+    paint();
+    followActive();
+    if (!rafId && keepLooping()) rafId = requestAnimationFrame(loop);
+  }
+
+  function startLoop() {
+    if (rafId || !bar || !video || !enabled()) return;
+    rafId = requestAnimationFrame(loop);
+  }
+
+  // 线条必须跟着"当前屏幕上这张卡片"的视频。抖音切视频时会留下上一条继续播放的旧视频，
+  // 若线条挂在它身上，表现就是"画面已经切走了，线条还按上一套时间在走"。
+  // 这里只做最保守的纠正：当前目标已经不在 DOM 里 / 尺寸为 0 时才换，避免抢走暂停中的那条。
+  function followActive() {
+    if (!video) return;
+    const now = performance.now();
+    if (now - idAt < 1000) return;
+    idAt = now;
+    if (video.isConnected && D.visibleArea(video) > 0) return;
+    const next = visibleVideo(null);
+    if (!next || next === video) return;
+    if (!ensure(next)) return;
+    paint(true);
+    startLoop();
   }
 
   function setUnknown(flag) {
@@ -101,7 +122,7 @@
     setUnknown(false);
     const cur = video.ended ? d : video.currentTime;
     // 循环播放 / 拖回开头：currentTime 明显变小，说明已经重新开始或往回跳了。
-    // 这里必须强制重画，否则线条会一直停在 100% 等下一帧 ——
+    // 必须强制重画，否则线条会一直停在 100% 等下一帧 ——
     // 表现就是"播完之后有时会从头走、有时不会"。
     const back = lastTime >= 0 && cur + 0.35 < lastTime;
     lastTime = cur;
@@ -111,97 +132,58 @@
     if (!force && !back && pct === lastPct) return;
     lastPct = pct;
     fill.style.transform = 'scaleX(' + pct + ')';
-    if (back && !video.paused) schedule();     // 回到开头后确保逐帧回调还在跑
   }
 
-  // 抖音很多 MSE 流的 video.duration 是 Infinity / NaN；这时用 seekable 区间
-  // 或播放器时间显示里的总时长兜底，否则这些视频的进度条会一直消失
-  // （表现就是"有时候有、有时候没有"）。直播返回 NaN，整条隐藏。
+  // 抖音很多 MSE 流的 video.duration 是 Infinity / NaN；这时用播放器时间显示里的总时长
+  // 或 seekable 区间兜底，否则这些视频的进度条会一直消失 / 算错。
+  // 直播返回 NaN，整条隐藏。
   function fallbackDuration(v) {
-    const host = v.closest('.xgplayer, .douyin-player') || v.parentElement;
-    if (!host) return NaN;
+    const box = v.closest('.xgplayer, .douyin-player') || v.parentElement;
+    if (!box) return NaN;
 
     // 直播：控制条里的 .time-live-tag 会从 display:none 变成显示
-    const liveTag = host.querySelector('.time-live-tag');
+    const liveTag = box.querySelector('.time-live-tag');
     if (liveTag) {
       const cs = getComputedStyle(liveTag);
       if (cs.display !== 'none' && cs.visibility !== 'hidden' &&
           liveTag.getBoundingClientRect().width > 0) return NaN;
     }
 
-    // MSE 点播常见：duration 为 Infinity，但 seekable 末端就是真实时长
+    // ① 播放器自己的总时长文案最接近真实时长（seekable 可能只到已缓冲位置）
+    const el = box.querySelector('.time-duration');
+    const text = el ? el.textContent.replace(/\s+/g, '').trim() : '';
+    if (text) {
+      const parts = text.split(':').map(Number);
+      if (parts.length >= 2 && parts.length <= 3 && parts.every(n => isFinite(n))) {
+        const sec = parts.length === 3
+          ? parts[0] * 3600 + parts[1] * 60 + parts[2]
+          : parts[0] * 60 + parts[1];
+        if (sec > 0) return sec;
+      }
+    }
+
+    // ② MSE 点播常见：duration 为 Infinity，但 seekable 末端就是真实时长
     const s = v.seekable;
     if (s && s.length) {
       const end = s.end(s.length - 1);
       if (isFinite(end) && end > 0) return end;
     }
-
-    // 最后再读一次播放器自己的总时长文案（mm:ss / hh:mm:ss）
-    const el = host.querySelector('.time-duration');
-    const text = el ? el.textContent.replace(/\s+/g, '').trim() : '';
-    if (!text) return NaN;
-    const parts = text.split(':').map(Number);
-    if (parts.length < 2 || parts.some(n => !isFinite(n))) return NaN;
-    return parts.length === 3
-      ? parts[0] * 3600 + parts[1] * 60 + parts[2]
-      : parts[0] * 60 + parts[1];
+    return NaN;
   }
 
   // 正常视频直接用 video.duration，不读布局；只有时长不是有限值时才走兜底，
-  // 并且最多每秒取样一次，避免逐帧查询 DOM。
+  // 并且最多每秒取样一次，避免逐帧查询 DOM。兜底值按最大值累积，
+  // 防止 seekable 只覆盖已缓冲区间时把进度算得忽快忽慢。
   function durationOf(v) {
     const d = v.duration;
-    if (isFinite(d) && d > 0) return d;
+    if (isFinite(d) && d > 0 && d < 86400) return d;
     const now = performance.now();
     if (now - effAt < 1000) return effDur;
     effAt = now;
-    effDur = fallbackDuration(v);
+    const fb = fallbackDuration(v);
+    if (!isFinite(fb) || fb <= 0) return effDur;
+    effDur = (isFinite(effDur) && effDur > 0) ? Math.max(effDur, fb) : fb;
     return effDur;
-  }
-
-  function schedule() {
-    if (frameCb || !bar || !video || !hasRVFC || !enabled()) return;
-    const v = video;
-    // 不能因为 ended 就不排帧：抖音播完是"直接 seek 回 0 继续播"，
-    // 这一下不一定触发 play / seeking，只有逐帧回调能把线条拉回开头。
-    if (v.paused) return;
-    const seq = ++frameSeq;
-    frameAt = performance.now();
-    frameCb = v.requestVideoFrameCallback(() => {
-      if (seq !== frameSeq) return;        // 已经被新一轮接管，忽略迟到的回调
-      frameCb = 0;
-      if (video !== v || !bar || !bar.isConnected) return;
-      paint();
-      schedule();
-    });
-  }
-
-  // rVFC 在暂停 / 播完 / 页面不可见时不会回调，frameCb 会一直占着，
-  // 之后即使继续播也排不上帧 —— 线条只剩 4Hz 的 timeupdate，
-  // 看起来就是"有时跟得上、有时卡住"。这里做一次廉价自愈。
-  function ensureFrames() {
-    if (!frameCb || !bar || !video) return;
-    if (performance.now() - frameAt < 700) return;
-    frameSeq++;                            // 作废迟到的旧回调
-    frameCb = 0;
-    schedule();
-  }
-
-  // 拖动 / 点击原生进度条（快进快退、跳转）时逐帧跟随。
-  // seek 期间视频常常是暂停的，rVFC 不会回调，所以这里用 rAF 补 1.2 秒。
-  function seekBurst() {
-    if (seekRaf || !bar || !video || !enabled()) return;
-    const now = performance.now();
-    const until = now + 1200;        // 正常补 1.2 秒
-    const hardStop = now + 3000;     // 拖住不放时最多补 3 秒，避免无限 rAF
-    const step = () => {
-      seekRaf = 0;
-      if (!bar || !video || !enabled()) return;
-      paint(true);
-      const t = performance.now();
-      if (t < until || (video.seeking && t < hardStop)) seekRaf = requestAnimationFrame(step);
-    };
-    seekRaf = requestAnimationFrame(step);
   }
 
   // 播完这一条：先画满，再补几次兜底重画。
@@ -209,16 +191,20 @@
   // 后者不保证触发 play / seeking，只靠事件会漏，所以这里定时复核一次 currentTime。
   function onEnded(v) {
     paint(true);
-    lastPct = 1;
     clearEnded();
     for (const ms of [80, 260, 900]) {
       endedTimers.push(setTimeout(() => {
         if (video !== v || !bar) return;
         lastTime = -1;                     // 不管回到没回到开头，都按最新值重画
         paint(true);
-        if (!v.paused) { schedule(); ensureFrames(); }
+        if (!v.paused) startLoop();
       }, ms));
     }
+  }
+
+  function clearEnded() {
+    endedTimers.forEach(clearTimeout);
+    endedTimers = [];
   }
 
   // 播放器重渲染（开评论、切布局）会把我们的节点一起清掉：重新挂到新宿主上
@@ -227,8 +213,7 @@
     if (!nextHost) return false;
     if (video === v && host === nextHost && bar && bar.isConnected) return true;
 
-    cancelFrame();
-    stopSeekBurst();
+    stopLoop();
     clearEnded();
     if (bar) bar.remove();
     video = v;
@@ -236,7 +221,7 @@
     unknown = null;
     lastPct = -1;
     lastTime = -1;
-    frameAt = 0;
+    idAt = 0;
     effDur = NaN;
     effAt = 0;
 
@@ -244,7 +229,6 @@
     bar.className = 'dyc-progress';
     bar.setAttribute('data-dyc-progress', '');
     bar.setAttribute('aria-hidden', 'true');
-    if (!hasRVFC) bar.setAttribute(ATTR_SMOOTH, '');
     fill = document.createElement('div');
     fill.className = 'dyc-progress-fill';
     fill.style.transform = 'scaleX(0)';
@@ -254,14 +238,13 @@
   }
 
   function detach() {
-    cancelFrame();
-    stopSeekBurst();
+    stopLoop();
     clearEnded();
     video = null;
     host = null;
     lastPct = -1;
     lastTime = -1;
-    frameAt = 0;
+    idAt = 0;
     unknown = null;
     effDur = NaN;
     effAt = 0;
@@ -272,21 +255,20 @@
 
   // 预加载的相邻视频也会触发媒体事件 / 被 main.js 传进来。
   // 进度条只应该挂在"当前屏幕上这张卡片"的视频上；优先用 feed-active-video，
-  // 没有再退回传进来的视频 / 当前在播视频。自动跳广告后卡片会换，这一步能防止
-  // 线条被留在上一张或屏幕外的预加载卡片里。
+  // 没有再退回传进来的视频 / 当前在播视频。
   function visibleVideo(v) {
     const active = document.querySelector('[data-e2e="feed-active-video"]');
     const activeVideo = active && active.querySelector('video');
     const pool = [activeVideo, v, D.playingVideo()].filter(Boolean);
     for (const c of pool) {
-      const r = c.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) return c;
+      if (D.visibleArea(c) > 0 && D.inFeedCard(c)) return c;
+    }
+    for (const c of pool) {
+      if (D.visibleArea(c) > 0) return c;
     }
     return pool[0] || null;
   }
 
-  // 预加载的相邻视频也会触发媒体事件 / 被 main.js 传进来，
-  // 统一只认"当前在播且面积最大"的那个，避免线条挂到屏幕外的卡片上。
   function attach(v) {
     if (!enabled() || !html.classList.contains('dyc-feed')) {
       detach();
@@ -303,7 +285,7 @@
     if (!target) return;
     if (!ensure(target)) return;
     paint(true);
-    schedule();
+    startLoop();
   }
 
   const MEDIA_EVENTS = [
@@ -338,7 +320,7 @@
         // 宿主被播放器重渲染了：重新挂上并补一帧
         if (!ensure(v)) return;
         paint(true);
-        schedule();
+        startLoop();
         return;
       }
 
@@ -347,29 +329,38 @@
         return;
       }
 
-      paint();
-
-      // 快进 / 快退 / 点进度条跳转：seek 期间逐帧补，松手后再对齐一次
+      // seek 相关的三个事件都要即时对齐：拖动 / 点击跳转时，事件可能早于
+      // 实际时间更新，所以除了立刻画一帧，还要开一个 1.2 秒的跟随窗口。
       if (type === 'seeking') {
-        seekBurst();
+        seekUntil = performance.now() + 1200;
+        lastTime = -1;
+        paint(true);
+        startLoop();
         return;
       }
       if (type === 'seeked') {
+        seekUntil = performance.now() + 300;
         lastTime = -1;
         paint(true);
-        schedule();
-        ensureFrames();
+        startLoop();
         return;
       }
-      if (type === 'play' || type === 'playing' || type === 'ratechange') {
-        schedule();
-        ensureFrames();
-        return;
+
+      paint();
+      if (type === 'play' || type === 'playing' || type === 'pause' ||
+          type === 'ratechange' || type === 'timeupdate' || type === 'waiting') {
+        startLoop();
       }
-      // timeupdate 约 4Hz：既补画，也用来发现"逐帧回调已经丢了"
-      if (type === 'timeupdate') ensureFrames();
     }, true);
   }
+
+  // 页面切回来时 rAF 可能停过一轮：重新起循环
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    if (!bar || !video) return;
+    paint(true);
+    startLoop();
+  });
 
   D.progress = {
     attach,
@@ -386,14 +377,13 @@
       const nextHost = target.closest('.xgplayer, .douyin-player') || target.parentElement;
       if (video === target && host === nextHost && bar && bar.isConnected) {
         paint();                 // 顺带补一帧：暂停时也能把最新位置画出来
-        ensureFrames();          // 逐帧回调丢了就重新排
         return;
       }
       // 这里不用 attach()：暂停时 attach 会退回 D.playingVideo()，可能挂到别的预加载卡片上；
       // 看门狗 / 显示切换传进来的就是当前视频，直接挂它。
       if (!ensure(target)) return;
       paint(true);
-      schedule();
+      startLoop();
     },
     applySettings() {
       paintColor();
@@ -410,11 +400,13 @@
       return {
         启用: enabled(),
         线条: !!(bar && bar.isConnected),
-        逐帧: hasRVFC,
-        时长: isFinite(d) ? Math.round(d * 10) / 10 : null,
-        进度: (video && isFinite(d) && d > 0)
-          ? Math.round(video.currentTime / d * 1000) / 10 + '%'
-          : null
+        循环: !!rafId,
+        暂停: video ? video.paused : null,
+        拖动中: video ? video.seeking : null,
+        当前时间: video && isFinite(video.currentTime) ? Math.round(video.currentTime * 10) / 10 : null,
+        时长: isFinite(d) ? Math.round(d * 10) / 10 : (isFinite(effDur) ? '兜底 ' + Math.round(effDur * 10) / 10 : null),
+        倍速: video ? video.playbackRate : null,
+        进度: (video && lastPct >= 0) ? Math.round(lastPct * 1000) / 10 + '%' : null
       };
     },
     reset() {
