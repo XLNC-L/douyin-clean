@@ -6,6 +6,31 @@
 > `1.4.x` 与 `1.5.x` 是本地迭代版本，未单独发布 Release，其改动已并入 `1.6.0`。
 > `1.6.2` ~ `1.6.4` 同样是本地迭代版本，未单独发布 Release，其改动已并入 `1.7.0`。
 
+## [1.9.14] - 2026-10-28
+
+真机 dump 出播放器进度条的真实结构后，定位到"进度条不跟 seek"的真凶。
+
+### 修复
+
+- **镜像取错元素**：真实结构是
+  `.xgplayer-progress-inner`（容器，宽度恒等于父级 100%）里放 `.xgplayer-progress-cache`（缓冲）和 `.xgplayer-progress-played`（已播）。
+  旧选择器把 `progress-inner` 也算进候选，`querySelector` 按文档序先命中容器，镜像值永远是 100%；
+  再叠加 `duration = Infinity`，线条就彻底不跟 seek。现在只认 `progress-played` / `progress-current`，
+  并且先读 `style.width` 百分比（xgplayer 用 width，不是 transform），再读 `scaleX`。
+- **判定顺序重排**：`paint()` 现在是「有限 duration → 上次有效时长（抵消 seek 瞬间的 NaN）→ 镜像原生进度 → 时间文案 / seekable 兜底」。
+- **位置改回贴播放器底部**：上一版按 `<video>` 底边对齐，会悬在控制条上方，看起来像飘起来了；现在垂直方向回到容器底部，只保留水平方向与视频画面对齐。
+
+### 验证
+
+真机（详情页，246s 视频）：
+- 有限时长 seek 45% → 线条 45.1%；
+- 强制 `duration = Infinity` 后 seek 60s → 24.6%、seek 180s → 73.2%，与原生 `.xgplayer-progress-played` 完全一致；
+- 线条底边与容器底边齐平（718/718）。
+
+### 工程
+
+- 版本号统一到 `1.9.14`。
+
 ## [1.9.13] - 2026-10-28
 
 这版是在真机（`www.douyin.com/video/...` 详情页，922×531、时长 286s 的视频）上实测后修的。
