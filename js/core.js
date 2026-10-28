@@ -7,7 +7,7 @@
  *    只比对 <video> 引用与卡片文案指纹；导航逐项隐藏用的是 #douyin-navigation 内的
  *    局部 MutationObserver（custom / off 模式启用），不会观察整页；
  * 3) 刷视频的时机只来自媒体事件（loadedmetadata / play 捕获阶段），事件驱动；
- *    进度条用 requestVideoFrameCallback 逐帧更新，同样不是定时器；
+ *    进度条用 requestAnimationFrame 逐帧读 currentTime，同样不是定时器；
  * 4) 鼠标事件 passive，且每帧最多处理一次，只切换一个 class；
  * 5) 扫描类操作只在启动时做一次，并且有数量上限。
  */
