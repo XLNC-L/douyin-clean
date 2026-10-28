@@ -5,11 +5,17 @@
 ![manifest](https://img.shields.io/badge/Manifest-V3-4285F4)
 ![platform](https://img.shields.io/badge/Chrome-Desktop-34A853)
 
-当前版本：v1.9.11 · [下载 / Releases](https://github.com/XLNC-L/douyin-clean/releases) · [更新日志](CHANGELOG.md)
+当前版本：v1.9.12 · [下载 / Releases](https://github.com/XLNC-L/douyin-clean/releases) · [更新日志](CHANGELOG.md)
 
 ![界面示意：左为默认界面，右为启用扩展后](docs/preview.svg)
 
 一个针对**网页版抖音**（`www.douyin.com`）的 Chrome 扩展：**自动最高清晰度**、**带货广告自动跳过**、**失焦暂停**、**纯净布局**、**视频底部进度细线**，所有功能都能在扩展面板里分项开关。不做列表轮询、不全站监听、不删 DOM 节点 —— 刷视频不卡。
+
+## 最新变化（v1.9.12）
+
+- **进度线在「时长未知」的视频上改为镜像抖音自己的进度条**：MSE 流的 `duration` 常是 `Infinity`，之前靠 `seekable` / 时间文案估算，个别视频会算错；现在时长不可用时直接读播放器自己那条进度条的 `scaleX` / 宽度，线条与画面里的进度始终一致；
+- **新增实时诊断面板**：页面上按 `Alt + Shift + P` 弹出，实时显示「线条挂在哪条视频上 / 应该挂哪条 / 填充值 / 原生进度 / 循环状态」；控制台 `__DYC.progress.log()` 可看最近 40 条 seek / play / ended 事件；
+- 进度线每 120ms 复核一次目标视频，换片、播放器重渲染后都会立刻改挂。
 
 ## 最新变化（v1.9.11）
 

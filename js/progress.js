@@ -143,21 +143,93 @@
     else bar.removeAttribute(ATTR_UNKNOWN);
   }
 
+  // ---------- 镜像抖音自己的进度条 ----------
+  // 我们的线条本质上是"复述"播放进度。抖音的播放器有 MSE / 虚拟时间轴 / 特殊 seek 等情况，
+  // 个别视频上 video.currentTime 与用户看到的进度会不一致，这时直接读它自己的进度条更准。
+  // 只读 style 上的 transform / width（不触发布局），最多每 200ms 取一次。
+  const PROGRESS_SEL = '[class*="progress-played"], [class*="progress-inner"], [class*="progress-current"]';
+  let mirrorAt = 0;
+  let mirrorVal = NaN;
+  let mirrorLast = NaN;
+  let mirrorSince = 0;
+  let mirrorCt = 0;
+  let mirrorOff = false;
+
+  const clamp01 = n => (n < 0 ? 0 : n > 1 ? 1 : n);
+
+  function resetMirror() {
+    mirrorAt = 0;
+    mirrorVal = NaN;
+    mirrorLast = NaN;
+    mirrorSince = 0;
+    mirrorCt = 0;
+    mirrorOff = false;
+  }
+
+  function readMirror() {
+    if (mirrorOff || !video) return NaN;
+    const box = host || video.closest('.xgplayer, .douyin-player');
+    if (!box) return NaN;
+    const el = box.querySelector(PROGRESS_SEL);
+    if (!el) return NaN;
+    const tf = el.style.transform || '';
+    const m = /scaleX\(\s*([\d.]+)\s*\)/.exec(tf);
+    if (m) return clamp01(parseFloat(m[1]));
+    const w = el.style.width || '';
+    if (/%\s*$/.test(w)) return clamp01(parseFloat(w) / 100);
+    // 最后退回几何（最多 5 次/秒，代价可接受）
+    const p = el.parentElement;
+    if (!p) return NaN;
+    const pw = p.getBoundingClientRect().width;
+    if (!(pw > 0)) return NaN;
+    return clamp01(el.getBoundingClientRect().width / pw);
+  }
+
+  // 防御：如果认到的这个"进度条"一直不动、而 currentTime 在走，说明认错了元素，
+  // 本视频不再镜像，避免线条被钉死在某个位置。
+  function mirrorRatio() {
+    const now = performance.now();
+    if (now - mirrorAt < 200) return mirrorVal;
+    mirrorAt = now;
+    mirrorVal = readMirror();
+    if (isFinite(mirrorVal)) {
+      const cur = video.currentTime;
+      if (mirrorVal !== mirrorLast) {
+        mirrorLast = mirrorVal;
+        mirrorSince = now;
+        mirrorCt = cur;
+      } else if (now - mirrorSince > 4000 && Math.abs(cur - mirrorCt) > 2) {
+        mirrorOff = true;
+        mirrorVal = NaN;
+      }
+    }
+    return mirrorVal;
+  }
+
   function paint(force) {
     if (!bar || !video) return;
     const d = durationOf(video);
-    if (!isFinite(d) || d <= 0) {
-      setUnknown(true);
-      return;
-    }
-    setUnknown(false);
     const cur = video.ended ? d : video.currentTime;
+    let ratio;
+    if (isFinite(d) && d > 0) {
+      // 时长已知：currentTime / duration 就是准确值，不折腾
+      ratio = clamp01(cur / d);
+      setUnknown(false);
+    } else {
+      // 时长未知（MSE 流）：优先镜像抖音自己的进度条，读不到才判为"未知"整条隐藏
+      const nr = mirrorRatio();
+      if (!isFinite(nr)) {
+        setUnknown(true);
+        return;
+      }
+      ratio = nr;
+      setUnknown(false);
+    }
     // 循环播放 / 拖回开头：currentTime 明显变小，说明已经重新开始或往回跳了。
     // 必须强制重画，否则线条会一直停在 100% 等下一帧 ——
     // 表现就是"播完之后有时会从头走、有时不会"。
     const back = lastTime >= 0 && cur + 0.35 < lastTime;
     lastTime = cur;
-    const ratio = Math.max(0, Math.min(1, cur / d));
     // 万分之一：1000px 宽的线条上约 0.1px，肉眼看不出量化，却能挡掉大量重复写入
     const pct = Math.round(ratio * 10000) / 10000;
     if (!force && !back && pct === lastPct) return;
@@ -268,6 +340,7 @@
     idAt = 0;
     effDur = NaN;
     effAt = 0;
+    resetMirror();
 
     bar = document.createElement('div');
     bar.className = 'dyc-progress';
@@ -292,6 +365,7 @@
     unknown = null;
     effDur = NaN;
     effAt = 0;
+    resetMirror();
     if (bar) bar.remove();
     bar = null;
     fill = null;
@@ -332,6 +406,7 @@
     document.addEventListener(type, e => {
       const v = e.target;
       if (!(v instanceof HTMLVideoElement)) return;
+      if (LOG_TYPES[type]) logEvent(type, v);
       if (!enabled() || !html.classList.contains('dyc-feed')) return;
       // 聊天页 / 私信抽屉 / 好友分享弹层里的播放器不挂进度线
       if (D.isOverlayVideo(v)) return;
@@ -397,6 +472,64 @@
     startLoop();
   });
 
+  // ---------- 诊断：事件日志 + 实时面板（Alt+Shift+P） ----------
+  // 真机排查用：面板直接显示"线条挂在哪条视频上、该挂哪条、填充值、原生进度"，
+  // 事件日志记录最近 40 条 seek / play / ended，便于判断是"没收到事件"还是"收到了但没画"。
+  const LOG_TYPES = { seeking: 1, seeked: 1, ended: 1, ratechange: 1, play: 1, pause: 1, emptied: 1, durationchange: 1 };
+  const evLog = [];
+
+  function logEvent(type, v) {
+    const d = v.duration;
+    evLog.push(type + ' t=' + (Math.round(v.currentTime * 100) / 100) +
+      ' d=' + (isFinite(d) ? Math.round(d * 100) / 100 : d));
+    if (evLog.length > 40) evLog.shift();
+  }
+
+  let hudEl = null;
+  let hudTimer = 0;
+
+  function hudText() {
+    const best = bestTarget();
+    const d = video ? video.duration : NaN;
+    const fmt = n => (isFinite(n) ? Math.round(n * 100) / 100 : String(n));
+    return [
+      '抖音净播 v' + D.VER,
+      '循环 ' + (rafId ? 'on' : 'off') + ' · 线条 ' + (bar && bar.isConnected ? 'on' : 'off') +
+        ' · 未知 ' + (unknown ? 'Y' : 'N') + ' · 镜像 ' + (mirrorOff ? 'off' : 'on'),
+      '挂载 ' + (video ? (video.isConnected ? '' : '已移除 ') + (video.paused ? '暂停' : '播放') +
+        ' t=' + fmt(video.currentTime) + ' d=' + fmt(d) + ' x' + video.playbackRate : '无'),
+      '应挂 ' + (best ? (best === video ? '同一条 ' : '不同! ') + (best.paused ? '暂停' : '播放') +
+        ' t=' + fmt(best.currentTime) : '无'),
+      '填充 ' + (lastPct >= 0 ? (lastPct * 100).toFixed(1) + '%' : '-') +
+        ' · 原生 ' + (isFinite(mirrorVal) ? (mirrorVal * 100).toFixed(1) + '%' : '无'),
+      '宿主 ' + (host ? String(host.className).slice(0, 46) : '-')
+    ].join('\n');
+  }
+
+  function toggleHud() {
+    if (hudEl) {
+      clearInterval(hudTimer);
+      hudTimer = 0;
+      hudEl.remove();
+      hudEl = null;
+      return;
+    }
+    hudEl = document.createElement('div');
+    hudEl.style.cssText = 'position:fixed;left:12px;top:12px;z-index:2147483647;padding:8px 10px;' +
+      'background:rgba(0,0,0,.78);color:#25f4ee;font:11px/1.55 ui-monospace,Consolas,monospace;' +
+      'white-space:pre;border-radius:6px;pointer-events:none';
+    document.body.appendChild(hudEl);
+    const tick = () => { if (hudEl) hudEl.textContent = hudText(); };
+    tick();
+    hudTimer = setInterval(tick, 250);
+  }
+
+  window.addEventListener('keydown', e => {
+    if (!e.altKey || !e.shiftKey || e.key.toLowerCase() !== 'p') return;
+    e.preventDefault();
+    toggleHud();
+  }, { passive: false });
+
   D.progress = {
     attach,
     // 幂等补挂：只在"视频/宿主/节点"真的变了或被播放器清掉时才重建。
@@ -452,6 +585,10 @@
         } : null,
         进度: (video && lastPct >= 0) ? Math.round(lastPct * 1000) / 10 + '%' : null
       };
+    },
+    // 最近 40 条 seek / play / ended 事件，真机排查用
+    log() {
+      return evLog.slice();
     },
     reset() {
       detach();
