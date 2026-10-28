@@ -57,14 +57,13 @@
   //   · 直播卡片 / 房间会带 data-e2e="live-room-*" / "livecard-*" / "web_live" 等语义标记；
   //   · 卡片链接指向 live.douyin.com 或 /live/。
   // 注意：每个头像都带 data-e2e="live-avatar"，绝不能按 data-e2e*="live" 通配。
-  // v1.9.11：硬信号只可能出现在直播间卡片上，单独命中即可跳过；
-  // 软信号（单独一个「直播」字样、或「1.2万观看」）容易被标题 / 文案带偏，
-  // 必须凑两条才判，避免把"讲直播带货的普通视频"当成直播间跳掉。
-  const LIVE_BADGE_HARD_RE = /^(直播中|LIVE|进入直播间|正在直播)$/i;
-  const LIVE_BADGE_SOFT_RE = /^(直播|直播回放)$/;
-  const LIVE_VIEWER_RE = /^(\d+(\.\d+)?[万wW]?\+?人?(正在)?(观看|在看)|人气[\d.]+万?|在线观众[\d.]+万?)$/;
+  // v1.9.16：只有"当前这条视频本身"具备直播特征才跳过。
+  // 作者正在直播时，普通视频卡片上会带作者头像直播圈、「正在直播 / 进入直播间」入口
+  // 和指向直播间的链接 —— 这些是"作者在直播"，不是"当前视频是直播间"，一律不参与判定。
+  // 因此直播链接 / 直播标记必须包住当前视频或播放器；文字徽标不再单独作为判定依据。
   const LIVE_LINK_SEL = 'a[href*="live.douyin.com"], a[href*="/live/"]';
-  const LIVE_MARK_SEL = '[data-e2e*="live-room"], [data-e2e*="livecard"], [data-e2e*="web_live"], [data-e2e*="live-enter-room"], [class*="LivePlayer_"], [class*="webcast-chatroom"]';
+  const LIVE_PLAYER_SEL = '[class*="LivePlayer_"], [class*="webcast-chatroom"]';
+  const LIVE_MARK_SEL = '[data-e2e*="live-room"], [data-e2e*="livecard"], [data-e2e*="web_live"]';
   const MAX_LIVE_STREAK = 5;     // 连续跳过这么多条直播后先停一下，避免推荐流全是直播时无限切
   let liveStreak = 0;
   // 抖音复用同一个 <video> 元素播放所有视频，判定状态不能挂在元素上：
@@ -220,85 +219,53 @@
     return '';
   }
 
-  // 直播判定：同时看"视频卡片"和"播放器容器"两层。
-  // 卡片里有链接 / livecard / live-room 标记；播放器容器本身可能就带 LivePlayer_ 类，
-  // 只查卡片会漏掉（直播间的 cardOf 往往只是 video 的父层）。
-  // v1.9.11：分硬信号 / 软信号。硬信号（直播间链接、LivePlayer_、直播时间标签、
-  // 「直播中 / 进入直播间」徽标）单独命中即可；软信号（单独一个「直播」字样、
-  // 「1.2万观看」这类人气文案）要凑够两条才判 —— 否则"讲直播的普通视频"会被误跳。
+  // 直播判定：只认"当前这条视频本身是直播"的结构信号。
+  // 作者正在直播时，普通视频卡片上也会出现头像直播圈、「正在直播 / 进入直播间」
+  // 和指向直播间的链接；这些属于作者状态，不能据此跳过当前视频。
+  // 因此：
+  //   1) 直播链接 / 直播标记必须包住当前视频或播放器；
+  //   2) 播放器本身必须是 LivePlayer_ / webcast-chatroom，或控制条显示直播时间标签；
+  //   3) 不再用「直播中 / 正在直播 / 进入直播间」文字单独判定。
   function liveHit(video) {
     if (!liveEnabled()) return '';
-    // 优先用整张活动卡（包含播放器之外的徽标 / 链接层），没有时退回 cardOf
     const card = video.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"]') || cardOf(video);
-    const player = video.closest('.xgplayer, .douyin-player, [class*="LivePlayer_"]');
-    const scopes = Array.from(new Set([card, player].filter(Boolean)));
-    const hard = [];
-    const soft = new Set();
+    const livePlayer = video.closest(LIVE_PLAYER_SEL);
+    const player = video.closest('.xgplayer, .douyin-player, [class*="basePlayerContainer" i]') || null;
 
-    // 1) 卡片链接直接指向直播间
-    for (const scope of scopes) {
-      const link = scope.querySelector(LIVE_LINK_SEL);
-      if (link && visibleBox(link)) { hard.push('直播间链接'); break; }
+    // 1) 播放器根节点本身就是直播播放器 / 直播聊天室
+    if (livePlayer && visibleBox(livePlayer)) return '直播(直播播放器)';
+
+    // 2) 控制条把总时长换成了「直播」标签（普通视频隐藏）
+    for (const root of [livePlayer, player]) {
+      if (!root) continue;
+      const tag = root.querySelector('.time-live-tag');
+      if (tag && visibleBox(tag)) return '直播(直播时间标签)';
     }
 
-    // 2) 播放器 / 直播房间的语义标记（排除 hidden 的预创建播放器）
-    if (!hard.length) {
-      for (const scope of scopes) {
-        if (scope.matches && scope.matches(LIVE_MARK_SEL) && visibleBox(scope)) {
-          hard.push('直播间标记');
-          break;
-        }
-        let n = 0;
-        let found = false;
-        for (const el of scope.querySelectorAll(LIVE_MARK_SEL)) {
-          if (++n > 8) break;
-          if (el.closest(COMMENT_PANEL_SEL)) continue;
-          if (!visibleBox(el)) continue;
-          found = true;
-          break;
-        }
-        if (found) { hard.push('直播间标记'); break; }
+    // 3) 直播链接：必须包住视频 / 播放器；作者头像、按钮等小入口一律不算
+    for (const scope of [card, player, livePlayer]) {
+      if (!scope) continue;
+      for (const link of scope.querySelectorAll(LIVE_LINK_SEL)) {
+        if (!visibleBox(link)) continue;
+        if (link.contains(video) ||
+            (player && link.contains(player)) ||
+            (livePlayer && link.contains(livePlayer))) return '直播(直播间链接)';
       }
     }
 
-    // 3) 控制条把总时长换成了「直播」标签（普通视频这个标签是 display:none）
-    if (!hard.length) {
-      for (const scope of scopes) {
-        const liveTag = scope.querySelector('.time-live-tag');
-        if (liveTag && visibleBox(liveTag)) { hard.push('直播时间标签'); break; }
+    // 4) 直播间语义标记：必须是视频 / 播放器的祖先或容器
+    for (const el of (card || document).querySelectorAll(LIVE_MARK_SEL)) {
+      if (!visibleBox(el)) continue;
+      if (el.closest(COMMENT_PANEL_SEL)) continue;
+      if (el.contains(video) ||
+          (player && (el.contains(player) || el === player)) ||
+          (livePlayer && (el.contains(livePlayer) || el === livePlayer))) {
+        return '直播(直播间标记)';
       }
     }
 
-    // 4) 小尺寸徽标文字 / 观看人数：排除标题 / 话题 / 评论，避免把文案里的"直播"当成直播
-    const vr = video.getBoundingClientRect();
-    for (const scope of scopes) {
-      const w = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
-      let node;
-      while ((node = w.nextNode())) {
-        const t = (node.nodeValue || '').replace(/\s+/g, '').trim();
-        if (!t || t.length > 10) continue;
-        const isHard = LIVE_BADGE_HARD_RE.test(t);
-        const isViewer = LIVE_VIEWER_RE.test(t);
-        const isSoft = LIVE_BADGE_SOFT_RE.test(t);
-        if (!isHard && !isViewer && !isSoft) continue;
-        const el = node.parentElement;
-        if (!el || el.closest(COMMENT_PANEL_SEL)) continue;
-        if (inInfoBox(el)) continue;
-        // 头像圈上的「直播中」是"这个作者正在直播"，不是"当前这条是直播间"，
-        // 必须排除，否则会把正常视频当成直播跳掉。
-        if (el.closest('[data-e2e*="avatar" i], [class*="avatar" i], [class*="Avatar"]')) continue;
-        const r = el.getBoundingClientRect();
-        if (r.width < 6 || r.height < 6 || r.width > 200 || r.height > 48) continue;
-        if (vr.width && !D.near(r, vr, 40)) continue;
-        if (isHard) { hard.push('直播徽标'); break; }
-        soft.add(isViewer ? '观看人数' : '直播字样');
-      }
-      if (hard.length) break;
-    }
-
-    if (hard.length) return '直播(' + hard[0] + ')';
-    // 只有软信号时要求两条同时成立（例如「直播」+「1.2万观看」）
-    if (soft.size >= 2) return '直播(' + Array.from(soft).join('+') + ')';
+    // 5) 「直播中 / 正在直播 / 进入直播间」文字与头像直播圈不参与判定：
+    //    那只能说明作者正在直播，当前视频仍可能是普通视频。
     return '';
   }
 
