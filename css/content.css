@@ -1,4 +1,4 @@
-/* 抖音净播 v1.9.8
+/* 抖音净播 v1.9.9
  * 全部视觉改动都在这一份静态 CSS 里完成：进入页面后运行时零成本。
  * 除左侧导航（dyc-nav-hidden / data-dyc-nav-hide）、顶栏精简（data-dyc-hide）外，
  * 其余规则都以 html.dyc-feed 为前提，只在"刷视频"页面生效。

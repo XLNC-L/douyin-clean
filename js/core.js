@@ -15,7 +15,7 @@
   'use strict';
 
   const D = (window.__DYC = {
-    VER: '1.9.8',
+    VER: '1.9.9',
     debug: false,
 
     // 视频代次：每换一条视频 +1。
@@ -125,6 +125,17 @@
   };
 
   D.textOf = el => (el && el.textContent ? el.textContent.replace(/\s+/g, '').trim() : '');
+
+  // 信息流里的视频：私信抽屉 / 好友分享弹层里的播放器不算。
+  // 这类播放器一旦被当成信息流视频，会触发广告判定去点背后的「下一条」箭头，
+  // 表现为"点开好友视频，原来的视频不暂停，反而滑到下一条"。
+  D.FEED_CARD_SEL = '[data-e2e="feed-item"], [data-e2e="feed-active-video"], .slider-video';
+  D.inFeed = v => {
+    if (!v || typeof v.closest !== 'function') return false;
+    if (!v.closest(D.FEED_CARD_SEL)) return false;
+    if (v.closest('aside')) return false;     // 私信 / 消息抽屉
+    return true;
+  };
 
   // 两个矩形是否相邻/相交（pad 为额外容差）
   D.near = (a, b, pad = 40) => !!a && !!b &&

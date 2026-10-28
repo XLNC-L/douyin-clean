@@ -279,6 +279,8 @@
 
   function judge(video) {
     if (!(video instanceof HTMLVideoElement)) return;
+    // 私信 / 好友分享弹层里的视频不是信息流视频：不判定、不点「下一条」
+    if (!D.inFeed(video)) return;
     if (!enabled() && !liveEnabled()) return;
     if (!document.documentElement.classList.contains('dyc-feed')) return;
     if (!video.isConnected) return;
@@ -290,6 +292,7 @@
       video = cur;
       st.gen = -1;
     }
+    if (!D.inFeed(video)) return;
 
     // 换了视频就重置判定状态（用代次，不用 duration/src —— 它们经常是 Infinity/空串）
     if (D.gen !== st.gen) st = { gen: D.gen, passes: 0, blocked: false, last: 0 };

@@ -116,13 +116,14 @@
   }
 
   function visibleVideo(v) {
-    if (onScreen(v)) return v;
+    // 私信 / 好友分享弹层里的视频不挂进度线：只认信息流里的播放器
+    if (v && D.inFeed(v) && onScreen(v)) return v;
     const a = activeCardVideo();
     if (a) return a;
     const on = D.onScreenVideo ? D.onScreenVideo() : null;
-    if (on) return on;
+    if (on && D.inFeed(on)) return on;
     const playing = D.playingVideo();
-    return playing || null;
+    return (playing && D.inFeed(playing)) ? playing : null;
   }
 
   // 逐帧顺带做一次"我是不是跟错视频了"的纠正（每秒最多一次，代价可忽略）
