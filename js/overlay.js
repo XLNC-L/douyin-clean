@@ -29,6 +29,7 @@
   // 游戏卡 / 推荐卡是否已找到；tickLeft 限制每个视频最多补标几次
   let gameDone = false;
   let recDone = false;
+  let badgeDone = false;       // 名字上方的小「推荐」标签是否已处理
   let tickLeft = 6;
   let pending = null;
   let wasInside = false;      // 上一次判断时鼠标是否在视频画面内
@@ -76,6 +77,7 @@
     marked = [];
     gameDone = false;
     recDone = false;
+    badgeDone = false;
     tickLeft = 6;
   }
 
@@ -315,40 +317,107 @@
     }
   }
 
-  // 画面左下角的「某某 推荐」卡片：跟视频信息一起显隐，但去掉过渡，
-  // 避免像游戏卡片那样比标题慢半拍。
+  // 「推荐」相关浮层有两类，都要跟标题 / 互动栏同步收起：
+  //   1) 左下角「某某 推荐」卡片：带图标，通常宽 40px 以上、位于画面下半部；
+  //   2) 作者名字上方的小「推荐」标签：可能只有 20~40px 宽，紧贴视频信息块顶部。
+  // 第二类尺寸比卡片小得多，不能套用第一类的 40px 下限，否则会像"长在画面上"一样露着。
   function markRecommend(v, vr) {
     const card = v.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"]') ||
       cardOf(v, vr) || v.parentElement;
     if (!card) return;
 
-    const near = el => {
+    const inComment = el =>
+      !!el.closest('[data-e2e*="comment"], [class*="comment-list"], [class*="comment-panel"]');
+    const inInfo = el => !!el.closest('.video-info-detail, [data-e2e*="video-info"]');
+
+    // 1) 「某某 推荐」卡片
+    if (!recDone) {
+      const near = el => {
+        if (inComment(el)) return null;
+        if (inInfo(el)) return null;
+        const r = el.getBoundingClientRect();
+        if (r.width < 40 || r.height < 12 || r.width > 320 || r.height > 48) return null;
+        if (vr.width && !D.near(r, vr, 48)) return null;
+        if (vr.width && r.left > vr.left + vr.width * 0.6) return null;    // 只认画面左侧
+        if (vr.height && r.top < vr.top + vr.height * 0.45) return null;   // 只认下半部
+        return r;
+      };
+
+      let n = 0;
+      for (const el of card.querySelectorAll('div, span, a, section')) {
+        if (++n > 900) break;
+        if (!near(el)) continue;
+        const t = D.textOf(el);
+        if (!t || t.length > 24 || !/推荐$/.test(t)) continue;
+        // 向上取到包含图标的最大小容器，连图标一起藏
+        let box = el;
+        while (box.parentElement && box.parentElement !== card) {
+          const p = box.parentElement;
+          if (!near(p)) break;
+          if (!/推荐$/.test(D.textOf(p))) break;
+          box = p;
+        }
+        markInstant(box);
+        recDone = true;
+        break;
+      }
+    }
+
+    // 2) 名字上方的小「推荐」标签
+    if (badgeDone) return;
+
+    // 信息块矩形：用来判断标签是不是"贴着名字上方"
+    let info = null;
+    let bestD = Infinity;
+    card.querySelectorAll('.video-info-detail, [data-e2e*="video-info"]').forEach(el => {
       const r = el.getBoundingClientRect();
-      if (r.width < 40 || r.height < 12 || r.width > 320 || r.height > 48) return null;
-      if (vr.width && !D.near(r, vr, 48)) return null;
-      if (vr.width && r.left > vr.left + vr.width * 0.6) return null;    // 只认画面左侧
-      if (vr.height && r.top < vr.top + vr.height * 0.45) return null;   // 只认下半部
-      if (el.closest('[data-e2e*="comment"], [class*="comment-list"], [class*="comment-panel"]')) return null;
-      if (el.closest('.video-info-detail, [data-e2e*="video-info"]')) return null;
-      return r;
-    };
+      if (r.width < 40 || r.height < 10) return;
+      if (vr.width && !D.near(r, vr, 40)) return;
+      const d = Math.abs(r.left - vr.left) + Math.abs(r.bottom - vr.bottom);
+      if (d < bestD) { bestD = d; info = r; }
+    });
 
     let n = 0;
-    for (const el of card.querySelectorAll('div, span, a, section')) {
-      if (++n > 900) break;
-      if (!near(el)) continue;
-      const t = D.textOf(el);
-      if (!t || t.length > 24 || !/推荐$/.test(t)) continue;
-      // 向上取到包含图标的最大小容器，连图标一起藏
+    for (const el of card.querySelectorAll('div, span, a, section, button, img')) {
+      if (++n > 1200) break;
+      // 先做零几何的文本判断：只有文案就是「推荐」的小元素才值得量尺寸。
+      // 可见文案优先于 aria-label / title / alt，避免外层标签写了更长的说明就漏掉。
+      if (el.childElementCount > 6) continue;
+      const text = (el.textContent || '').replace(/\s+/g, '');
+      const label = text || (el.getAttribute('aria-label') || el.getAttribute('title') ||
+        el.getAttribute('alt') || '').replace(/\s+/g, '');
+      if (!label || label.length > 24 || label !== '推荐') continue;
+
+      const r = el.getBoundingClientRect();
+      if (r.width < 16 || r.height < 10 || r.width > 96 || r.height > 40) continue;
+      if (vr.width && !D.near(r, vr, 36)) continue;
+      if (inComment(el)) continue;
+
+      // 标签本来就在信息块里：信息块收起时它自然跟着收起，不用重复标记
+      if (inInfo(el)) {
+        badgeDone = true;
+        return;
+      }
+
+      const aboveInfo = !!info &&
+        r.bottom <= info.top + 14 && r.top >= info.top - 120 &&
+        r.left < info.right && r.right > info.left;
+      const lowerLeft = vr.width && r.left < vr.left + vr.width * 0.6 &&
+        r.top > vr.top + vr.height * 0.4;
+      if (!aboveInfo && !lowerLeft) continue;
+
+      // 向上收拢到整枚小标签（含图标 / 背景），但不要越过一个正常的信息块
       let box = el;
       while (box.parentElement && box.parentElement !== card) {
         const p = box.parentElement;
-        if (!near(p)) break;
-        if (!/推荐$/.test(D.textOf(p))) break;
+        const pr = p.getBoundingClientRect();
+        if (pr.width > 120 || pr.height > 48) break;
+        if (vr.width && !D.near(pr, vr, 36)) break;
+        if ((p.textContent || '').replace(/\s+/g, '') !== '推荐') break;
         box = p;
       }
       markInstant(box);
-      recDone = true;
+      badgeDone = true;
       return;
     }
   }
@@ -487,7 +556,7 @@
     // 只在换片时标记一次会漏；这里只扫左下角两类小卡片，开销极小。
     tick() {
       if (!enabled() || !html.classList.contains('dyc-feed')) return;
-      if (gameDone && recDone) return;      // 两类卡片都找到了，不再扫
+      if (gameDone && recDone && badgeDone) return;  // 两类卡片与推荐标签都找到了，不再扫
       if (tickLeft <= 0) return;            // 每个视频最多补标 6 次（约 12 秒）
       tickLeft--;
       const v = activeVideo() || currentVideo || D.playingVideo();
@@ -495,7 +564,7 @@
       const vr = v.getBoundingClientRect();
       if (!vr.width || !vr.height) return;
       if (!gameDone) markGame(v, vr);
-      if (!recDone) markRecommend(v, vr);
+      if (!recDone || !badgeDone) markRecommend(v, vr);
     },
     applySettings() {
       if (!html.classList.contains('dyc-feed')) {
