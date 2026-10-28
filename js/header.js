@@ -1,14 +1,12 @@
 /* 顶栏图标精简：默认精简 / 自定义保留 / 保持原样
  *
  * 抖音顶栏是哈希 class，不能写死选择器，所以：
- * 1) 先从右上角的头像画出"图标组"容器；
+ * 1) 先从右上角的头像图片往上找出"图标组"容器；
  * 2) 默认精简：容器内按 aria-label/title/文本 判断，命中通知/消息/头像的保留，
  *    其余隐藏；图标没有文字标签时退化为"保留最右侧三个"；
  * 3) 自定义保留：按文案只保留用户勾选的图标（头像始终保留），
  *    勾选列表由 popup 通过 labels() 现取；
- * 4) 顶栏精简对所有页面生效（推荐、关注、朋友、搜索、个人主页……），
- *    不再只限于视频流页面；页面晚渲染时用有上限的重试 + 局部观察补上。
- * 5) 观察范围只到"找到的那一组图标"，不做整页监听。
+ * 4) 只做一次性扫描（启动 + 有上限的重试），不做常驻监听。
  */
 (() => {
   const D = window.__DYC;
@@ -17,24 +15,12 @@
   const HIDE_ATTR = 'data-dyc-hide';
   const hidden = [];
 
-  let mo = null;
-  let moTarget = null;
-  let raf = 0;
-  let retries = 0;
-  let retryTimer = 0;
-
   function modeOf() {
     const h = D.settings && D.settings.header;
     return (h && h.mode) || 'simple';
   }
 
-  function stopWatch() {
-    if (mo) { mo.disconnect(); mo = null; }
-    moTarget = null;
-    if (raf) { cancelAnimationFrame(raf); raf = 0; }
-  }
-
-  function clearMarks() {
+  function reset() {
     hidden.forEach(el => el.removeAttribute(HIDE_ATTR));
     hidden.length = 0;
   }
@@ -58,61 +44,32 @@
     const img = el.querySelector('img');
     if (!img) return false;
     const r = img.getBoundingClientRect();
-    if (r.width < 20 || r.width > 64) return false;
+    if (r.width < 24 || r.width > 64) return false;
     const radius = getComputedStyle(img).borderRadius || '';
     return /%|px/.test(radius) && parseFloat(radius) >= 12;
   }
 
-  // 右上角的头像候选：贴在顶栏右侧、圆形、尺寸 20~64
-  function avatarAnchors() {
-    const vw = window.innerWidth;
-    const out = [];
-    let n = 0;
-    for (const img of document.querySelectorAll('img')) {
-      if (++n > 300) break;
-      const r = img.getBoundingClientRect();
-      if (r.width < 20 || r.width > 64 || r.height < 20 || r.height > 64) continue;
-      if (r.top < 0 || r.top > 80 || r.bottom > 100) continue;
-      if (r.right <= vw - 300) continue;
-      const radius = getComputedStyle(img).borderRadius || '';
-      if (!/%|px/.test(radius) || parseFloat(radius) < 12) continue;
-      out.push(img);
-    }
-    if (!out.length) {
-      for (const el of document.querySelectorAll('[data-e2e*="avatar" i]')) {
-        const r = el.getBoundingClientRect();
-        if (r.width < 20 || r.width > 64 || r.height < 20 || r.height > 64) continue;
-        if (r.top < 0 || r.top > 80 || r.right <= vw - 300) continue;
-        out.push(el);
-      }
-    }
-    return out;
-  }
-
-  // 从右上角"头像"往上找出图标组容器
+  // 从右上角"头像"往上找图标组容器
   function findCluster() {
-    const anchors = avatarAnchors();
-    for (const anchor of anchors) {
-      let node = anchor.parentElement;
-      let fallback = null;
-      for (let i = 0; i < 6 && node && node !== document.body; i++, node = node.parentElement) {
-        const r = node.getBoundingClientRect();
-        if (r.height <= 0 || r.height >= 90 || r.top > 100) continue;
-        if (r.width > window.innerWidth * 0.8) break;
-        const kids = visibleKids(node);
-        if (kids.length >= 3) return node;
-        if (kids.length >= 2 && !fallback) fallback = node;
-      }
-      if (fallback) return fallback;
+    const vw = window.innerWidth;
+    const imgs = document.querySelectorAll('img');
+    let anchor = null;
+    for (const img of imgs) {
+      const r = img.getBoundingClientRect();
+      if (r.width < 24 || r.width > 64 || r.top < 0 || r.top >= 96 || r.right <= vw - 260) continue;
+      const radius = getComputedStyle(img).borderRadius || '';
+      if (!/%|px/.test(radius) || parseFloat(radius) < 12) continue; // 只认圆形头像，避开装饰图
+      anchor = img;
+      break;
+    }
+    if (!anchor) return null;
+
+    let node = anchor.parentElement;
+    for (let i = 0; i < 5 && node; i++, node = node.parentElement) {
+      const r = node.getBoundingClientRect();
+      if (r.height > 0 && r.height < 80 && r.top < 96 && node.children.length >= 3) return node;
     }
     return null;
-  }
-
-  function visibleKids(cluster) {
-    return Array.from(cluster.children).filter(k => {
-      const r = k.getBoundingClientRect();
-      return r.width > 0 && r.height > 0;
-    });
   }
 
   function markHidden(el) {
@@ -191,58 +148,26 @@
     return kept;
   }
 
-  function watch(cluster) {
-    if (mo && moTarget === cluster) return;
-    stopWatch();
-    moTarget = cluster;
-    if (!cluster) return;
-    // 只盯找到的这一组图标：页面重渲染时补标，不观察整页
-    mo = new MutationObserver(() => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        apply();
-      });
-    });
-    mo.observe(cluster, { childList: true, subtree: true });
-  }
-
-  // 顶栏常常比内容晚渲染：有上限地补几次，失败也不会无限重试
-  function retryLater() {
-    if (retries >= 10 || retryTimer) return;
-    retries++;
-    retryTimer = setTimeout(() => {
-      retryTimer = 0;
-      apply();
-    }, 700);
-  }
-
-  function apply() {
-    clearTimeout(retryTimer);
-    retryTimer = 0;
-    clearMarks();
-    if (modeOf() === 'off') {
-      stopWatch();
-      retries = 0;
-      return false;
-    }
-
-    const cluster = findCluster();
-    if (!cluster) { retryLater(); return false; }
-
-    const kids = visibleKids(cluster);
-    if (kids.length < 2 || kids.length > 18) { retryLater(); return false; }
-
-    const kept = modeOf() === 'custom' ? applyCustom(kids) : applySimple(kids);
-    retries = 0;
-    watch(cluster);
-    D.log('header: 模式=' + modeOf(), '页面=' + location.pathname,
-      '保留入口', kept, '个，隐藏', hidden.length, '个');
-    return true;
-  }
-
   D.header = {
-    apply,
+    apply() {
+      reset();
+      if (modeOf() === 'off') return false;
+      if (!document.documentElement.classList.contains('dyc-feed')) return false;
+
+      const cluster = findCluster();
+      if (!cluster) return false;
+
+      const kids = Array.from(cluster.children).filter(k => {
+        const r = k.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+      if (kids.length < 3 || kids.length > 18) return false;
+
+      const kept = modeOf() === 'custom' ? applyCustom(kids) : applySimple(kids);
+      D.log('header: 模式=' + modeOf(), '保留入口', kept, '个，隐藏', hidden.length, '个');
+      return true;
+    },
+
     // popup 用的候选项：必须包含当前被隐藏的图标，所以先临时摘掉标记再量尺寸。
     // 整个函数同步执行，浏览器不会在中间绘制，不会看到闪烁。
     labels() {
@@ -251,7 +176,11 @@
       const marks = hidden.slice();
       marks.forEach(el => el.removeAttribute(HIDE_ATTR));
 
-      const labels = itemsOf(visibleKids(cluster)).map(it => it.label);
+      const kids = Array.from(cluster.children).filter(k => {
+        const r = k.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+      const labels = itemsOf(kids).map(it => it.label);
 
       marks.forEach(el => el.setAttribute(HIDE_ATTR, ''));
       return labels;
@@ -259,18 +188,12 @@
 
     applySettings() {
       if (modeOf() === 'off') {
-        this.reset();
+        reset();
         return;
       }
-      apply();
+      this.apply();
     },
 
-    reset() {
-      stopWatch();
-      clearTimeout(retryTimer);
-      retryTimer = 0;
-      retries = 0;
-      clearMarks();
-    },
+    reset,
   };
 })();

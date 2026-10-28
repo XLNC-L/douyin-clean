@@ -7,9 +7,16 @@
  * - 判定范围也收紧：只认视频卡片里"小尺寸的广告/推广/赞助徽标"，不再扫 body、不再靠 URL 猜。
  * 另外加了冷却：1.5 秒内最多跳过一条，避免误判时连环跳视频。
  *
- * 直播：用户会主动看直播，所以**不再把直播视频当成广告跳过**（去掉了"直播中"徽标与 .flv 判定）。
+ * 直播：v1.8.0 起推荐流里的直播间也会自动跳过（面板里可单独关闭）。
+ * v1.9.11 把直播判定拆成硬信号 / 软信号：直播间链接、LivePlayer_、直播时间标签、
+ * 「直播中 / 进入直播间」徽标单独命中即可；只有「直播」字样或「1.2万观看」这类
+ * 软信号时，必须两条同时成立才判，避免把"讲直播的普通视频"误跳。
+ *
  * 带货：这类视频没有"广告"徽标，最稳的标志是画面左下角那颗"购物 / 商品名"小卡片
  * （位置固定、不随画面变化、也不会隐藏），其次是电商账号名。
+ * v1.9.11 把文字判据分级：强信号（广告徽标、带分隔符的购物卡片）单独命中即跳过；
+ * 弱信号（只有价格、只有购买按钮、只有营销话术）必须凑够两条不同种类，
+ * 否则"¥19.9 三件套开箱"这种普通视频会被误跳。
  *
  * 状态跟着"当前这条视频"走，不挂在 <video> 元素上 —— 抖音始终复用同一个元素播放
  * 所有视频，状态挂在元素上会导致第一条视频判满次数后，后面全部视频被直接放过。
@@ -22,7 +29,7 @@
   const D = window.__DYC;
   if (!D) return;
 
-  // 只保留"广告 / 推广 / 赞助"这类明确标注；直播不再跳过（用户需要看直播）
+  // 只保留"广告 / 推广 / 赞助"这类明确标注（直播由下面的 liveHit 单独判定）
   const BADGES = ['广告', '推广', '赞助'];
   // 评论区是用户主动打开的面板：里面的"广告/推广"字样、¥价格、店铺名都不是视频本身，
   // 必须排除出扫描范围，否则打开评论后很容易把正常视频判成带货。
@@ -41,6 +48,8 @@
   // 价格、购买按钮文案只作为兜底，避免只认"购物"两个字而漏判。
   const PRICE_RE = /^[¥￥]\s?\d/;
   const SHOP_CTA_RE = /(查看详情|立即购买|去购买|马上抢|加入购物车|领券购买)/;
+  // 营销话术：单独出现不算数（标题里也常写"同款"），必须和另一条弱信号同时成立。
+  const MARKETING_RE = /(小黄车|购物车|橱窗|同款商品|优惠券|领券|到手价|限时秒杀|点击左下角|左下角链接|商品链接|拍下)/;
 
   // 直播卡片与普通视频的区别（2026-10 实测）：
   //   · 播放器容器类名带 LivePlayer_（普通视频是 xgplayer）；
@@ -48,7 +57,12 @@
   //   · 直播卡片 / 房间会带 data-e2e="live-room-*" / "livecard-*" / "web_live" 等语义标记；
   //   · 卡片链接指向 live.douyin.com 或 /live/。
   // 注意：每个头像都带 data-e2e="live-avatar"，绝不能按 data-e2e*="live" 通配。
-  const LIVE_BADGE_RE = /^(直播中|直播|LIVE|进入直播间)$/i;
+  // v1.9.11：硬信号只可能出现在直播间卡片上，单独命中即可跳过；
+  // 软信号（单独一个「直播」字样、或「1.2万观看」）容易被标题 / 文案带偏，
+  // 必须凑两条才判，避免把"讲直播带货的普通视频"当成直播间跳掉。
+  const LIVE_BADGE_HARD_RE = /^(直播中|LIVE|进入直播间|正在直播)$/i;
+  const LIVE_BADGE_SOFT_RE = /^(直播|直播回放)$/;
+  const LIVE_VIEWER_RE = /^(\d+(\.\d+)?[万wW]?\+?人?(正在)?(观看|在看)|人气[\d.]+万?|在线观众[\d.]+万?)$/;
   const LIVE_LINK_SEL = 'a[href*="live.douyin.com"], a[href*="/live/"]';
   const LIVE_MARK_SEL = '[data-e2e*="live-room"], [data-e2e*="livecard"], [data-e2e*="web_live"], [data-e2e*="live-enter-room"], [class*="LivePlayer_"], [class*="webcast-chatroom"]';
   const MAX_LIVE_STREAK = 5;     // 连续跳过这么多条直播后先停一下，避免推荐流全是直播时无限切
@@ -77,12 +91,19 @@
     return cs.display !== 'none' && cs.visibility !== 'hidden';
   }
 
-  // 卡片内的文字扫描：一次遍历同时判"广告徽标"和"购物卡片"
+  // 卡片内的文字扫描：一次遍历同时收"广告徽标 / 购物卡片 / 价格 / 购买按钮 / 营销话术"。
+  // v1.9.11 起分成强信号与弱信号：
+  //   强信号（广告徽标、带分隔符的购物卡片）单独命中即可跳过；
+  //   弱信号（只有价格、只有购买按钮、只有营销话术）必须凑够两条不同种类，
+  //   否则"¥19.9 三件套开箱"这种普通视频会被误跳。
   // 不再要求元素是叶子节点 —— 购物卡片是"图标 + 购物/ + 商品名"的复合结构，
   // 文本落在带子元素的容器上；也不再限制 3 个字（"购物/厚切吐司面包"就超了）。
-  function textHit(root, vr) {
-    if (!root || !root.querySelectorAll) return '';
-    let chip = '';
+  const inInfoBox = el => !!el.closest('.video-info-detail, [data-e2e*="video-info"]');
+
+  function textSignals(root, vr) {
+    const out = { strong: '', weak: [] };
+    if (!root || !root.querySelectorAll) return out;
+    const weak = new Set();
     let n = 0;
     for (const el of root.querySelectorAll('span, div, i, em, b, p, a')) {
       if (++n > 900) break;
@@ -90,35 +111,39 @@
       const t = D.textOf(el);
       if (!t || t.length > 24) continue;
 
-      // ① 广告徽标：文本恰好是"广告/推广/赞助"
+      const r = el.getBoundingClientRect();
+      const boxOk = (maxW, maxH) => r.width >= 6 && r.height >= 6 &&
+        r.width <= maxW && r.height <= maxH && (!vr || D.near(r, vr, 40));
+
+      // ① 广告徽标（强）：文本恰好是"广告/推广/赞助"
       if (t.length <= 3 && BADGES.indexOf(t) !== -1) {
-        const rb = el.getBoundingClientRect();
-        if (rb.width < 6 || rb.height < 6) continue;
-        if (rb.width > 160 || rb.height > 48) continue;
-        if (vr && !D.near(rb, vr, 40)) continue;
-        return t;
+        if (boxOk(160, 48)) { out.strong = t; return out; }
+        continue;
       }
 
-      // ② 购物卡片：文案以"购物/商品"开头
-      if (!chip && (SHOP_CHIP_RE.test(t) || (/^(购物|商品)/.test(t) && el.querySelector('img, svg, i')))) {
-        const r = el.getBoundingClientRect();
-        if (r.width >= 6 && r.height >= 6 && r.width <= 320 && r.height <= 64 &&
-            (!vr || D.near(r, vr, 40))) {
-          chip = '购物卡片';
-          continue;
-        }
+      // ② 购物卡片（强）：文案以"购物/商品"开头且后面紧跟分隔符或就是这几个字
+      if (SHOP_CHIP_RE.test(t) && boxOk(320, 64)) { out.strong = '购物卡片'; return out; }
+      // 另一种样式是"购物 视频同款×××"，空格会被 textOf 去掉，分隔符判据失效，
+      // 这时必须带图标（购物车）才算，避免把"购物分享"这种普通文案误判成带货
+      if (/^(购物|商品)/.test(t) && t.length <= 16 &&
+          el.querySelector('img, svg, i') && boxOk(320, 64)) {
+        out.strong = '购物卡片';
+        return out;
       }
 
-      // ③ 商品卡兜底：另一种样式没有"购物"二字，靠价格 / 购买按钮识别
-      if (chip) continue;
-      if (!PRICE_RE.test(t) && !SHOP_CTA_RE.test(t)) continue;
-      const rc = el.getBoundingClientRect();
-      if (rc.width < 6 || rc.height < 6) continue;
-      if (rc.width > 320 || rc.height > 80) continue;
-      if (vr && !D.near(rc, vr, 40)) continue;
-      chip = '商品卡';
+      // ③ 价格（弱）：只认"整块文字就是一个价格"的小元素，避免把正文里的 ¥ 算进来
+      if (PRICE_RE.test(t) && t.length <= 12 && boxOk(220, 48)) { weak.add('价格'); continue; }
+
+      // ④ 购买按钮（弱）：整块文字就是按钮文案
+      if (SHOP_CTA_RE.test(t) && t.length <= 10 && boxOk(240, 56)) { weak.add('购买按钮'); continue; }
+
+      // ⑤ 营销话术（弱）：标题 / 简介里也常写"同款"，所以排除信息块，且必须另有一条弱信号
+      if (!inInfoBox(el) && MARKETING_RE.test(t) && t.length <= 20 && boxOk(300, 60)) {
+        weak.add('营销话术');
+      }
     }
-    return chip;
+    out.weak = Array.from(weak);
+    return out;
   }
 
   function attrHit(root) {
@@ -169,68 +194,111 @@
   function detect(video) {
     const vr = video.getBoundingClientRect();
     const card = cardOf(video);
-    let hit = attrHit(card);
-    if (!hit) hit = shopAnchorHit(card, vr);
-    if (!hit) hit = textHit(card, vr);
-    if (!hit) hit = shopAuthorHit(card, vr);
-    // 兜底：卡片容器认错时（视频不在预期的卡片结构里），
-    // 退一步在整页找"贴着视频画面"的购物卡片 —— 它固定在左下角，不随画面变化。
-    if (!hit && card !== document.body) hit = shopAnchorHit(document.body, vr) || textHit(document.body, vr);
-    return hit;
+
+    // 1) 容器语义最稳：商品卡容器 / 广告属性
+    let hit = shopAnchorHit(card, vr) || attrHit(card);
+    if (hit) return hit;
+
+    // 2) 文本信号：强信号直接判；弱信号要凑够两条不同种类
+    const s = textSignals(card, vr);
+    if (s.strong) return s.strong;
+    if (s.weak.length >= 2) return '带货(' + s.weak.join('+') + ')';
+
+    // 3) 店铺账号：旗舰店 / 专卖店 / 专营店 / 小店
+    hit = shopAuthorHit(card, vr);
+    if (hit) return hit;
+
+    // 4) 兜底：卡片容器认错时（视频不在预期的卡片结构里），
+    //    退一步在整页找"贴着视频画面"的商品卡 —— 它固定在左下角，不随画面变化。
+    //    这里只认强信号，避免把页面别处的价格 / 营销文案算到这条视频头上。
+    if (card !== document.body) {
+      hit = shopAnchorHit(document.body, vr);
+      if (hit) return hit;
+      const page = textSignals(document.body, vr);
+      if (page.strong) return page.strong;
+    }
+    return '';
   }
 
   // 直播判定：同时看"视频卡片"和"播放器容器"两层。
   // 卡片里有链接 / livecard / live-room 标记；播放器容器本身可能就带 LivePlayer_ 类，
   // 只查卡片会漏掉（直播间的 cardOf 往往只是 video 的父层）。
+  // v1.9.11：分硬信号 / 软信号。硬信号（直播间链接、LivePlayer_、直播时间标签、
+  // 「直播中 / 进入直播间」徽标）单独命中即可；软信号（单独一个「直播」字样、
+  // 「1.2万观看」这类人气文案）要凑够两条才判 —— 否则"讲直播的普通视频"会被误跳。
   function liveHit(video) {
     if (!liveEnabled()) return '';
     // 优先用整张活动卡（包含播放器之外的徽标 / 链接层），没有时退回 cardOf
     const card = video.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"]') || cardOf(video);
     const player = video.closest('.xgplayer, .douyin-player, [class*="LivePlayer_"]');
     const scopes = Array.from(new Set([card, player].filter(Boolean)));
+    const hard = [];
+    const soft = new Set();
 
     // 1) 卡片链接直接指向直播间
     for (const scope of scopes) {
       const link = scope.querySelector(LIVE_LINK_SEL);
-      if (link && visibleBox(link)) return '直播间链接';
+      if (link && visibleBox(link)) { hard.push('直播间链接'); break; }
     }
 
     // 2) 播放器 / 直播房间的语义标记（排除 hidden 的预创建播放器）
-    for (const scope of scopes) {
-      if (scope.matches && scope.matches(LIVE_MARK_SEL) && visibleBox(scope)) return '直播间标记';
-      let n = 0;
-      for (const el of scope.querySelectorAll(LIVE_MARK_SEL)) {
-        if (++n > 8) break;
-        if (el.closest(COMMENT_PANEL_SEL)) continue;
-        if (!visibleBox(el)) continue;
-        return '直播间标记';
+    if (!hard.length) {
+      for (const scope of scopes) {
+        if (scope.matches && scope.matches(LIVE_MARK_SEL) && visibleBox(scope)) {
+          hard.push('直播间标记');
+          break;
+        }
+        let n = 0;
+        let found = false;
+        for (const el of scope.querySelectorAll(LIVE_MARK_SEL)) {
+          if (++n > 8) break;
+          if (el.closest(COMMENT_PANEL_SEL)) continue;
+          if (!visibleBox(el)) continue;
+          found = true;
+          break;
+        }
+        if (found) { hard.push('直播间标记'); break; }
       }
     }
 
     // 3) 控制条把总时长换成了「直播」标签（普通视频这个标签是 display:none）
-    for (const scope of scopes) {
-      const liveTag = scope.querySelector('.time-live-tag');
-      if (liveTag && visibleBox(liveTag)) return '直播时间标签';
+    if (!hard.length) {
+      for (const scope of scopes) {
+        const liveTag = scope.querySelector('.time-live-tag');
+        if (liveTag && visibleBox(liveTag)) { hard.push('直播时间标签'); break; }
+      }
     }
 
-    // 4) 小尺寸徽标文字：排除标题 / 话题 / 评论，避免把文案里的"直播"当成直播
+    // 4) 小尺寸徽标文字 / 观看人数：排除标题 / 话题 / 评论，避免把文案里的"直播"当成直播
     const vr = video.getBoundingClientRect();
     for (const scope of scopes) {
       const w = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
       let node;
       while ((node = w.nextNode())) {
         const t = (node.nodeValue || '').replace(/\s+/g, '').trim();
-        if (!t || t.length > 8 || !LIVE_BADGE_RE.test(t)) continue;
+        if (!t || t.length > 10) continue;
+        const isHard = LIVE_BADGE_HARD_RE.test(t);
+        const isViewer = LIVE_VIEWER_RE.test(t);
+        const isSoft = LIVE_BADGE_SOFT_RE.test(t);
+        if (!isHard && !isViewer && !isSoft) continue;
         const el = node.parentElement;
         if (!el || el.closest(COMMENT_PANEL_SEL)) continue;
-        if (el.closest('.video-info-detail, [data-e2e*="video-info"]')) continue;
+        if (inInfoBox(el)) continue;
+        // 头像圈上的「直播中」是"这个作者正在直播"，不是"当前这条是直播间"，
+        // 必须排除，否则会把正常视频当成直播跳掉。
+        if (el.closest('[data-e2e*="avatar" i], [class*="avatar" i], [class*="Avatar"]')) continue;
         const r = el.getBoundingClientRect();
-        if (r.width < 6 || r.height < 6 || r.width > 160 || r.height > 48) continue;
+        if (r.width < 6 || r.height < 6 || r.width > 200 || r.height > 48) continue;
         if (vr.width && !D.near(r, vr, 40)) continue;
-        return '直播徽标';
+        if (isHard) { hard.push('直播徽标'); break; }
+        soft.add(isViewer ? '观看人数' : '直播字样');
       }
+      if (hard.length) break;
     }
 
+    if (hard.length) return '直播(' + hard[0] + ')';
+    // 只有软信号时要求两条同时成立（例如「直播」+「1.2万观看」）
+    if (soft.size >= 2) return '直播(' + Array.from(soft).join('+') + ')';
     return '';
   }
 
@@ -239,8 +307,6 @@
   // blocked 一置真就再也不试，于是那条带货视频会一直播下去。
   function next(video, depth) {
     const d = depth || 0;
-    // 私信 / 好友视频前台时不切走信息流；已排队的重试也要停
-    if (D.overlayContext()) return;
     // 节流只作用于"首次尝试"，复核后的重试与降级递归必须能继续执行
     if (d === 0) {
       const now = Date.now();
@@ -281,13 +347,12 @@
 
   function judge(video) {
     if (!(video instanceof HTMLVideoElement)) return;
-    // 私信 / 好友分享弹层里的视频不是信息流视频：不判定、不点「下一条」
-    if (!D.inFeed(video)) return;
-    // 私信抽屉 / 好友视频在前台时，背后的信息流一律不自动跳过
-    if (D.overlayContext()) return;
     if (!enabled() && !liveEnabled()) return;
     if (!document.documentElement.classList.contains('dyc-feed')) return;
     if (!video.isConnected) return;
+    // 聊天页 / 私信抽屉 / 好友分享弹层里的播放器不参与广告判定：
+    // 否则会把弹层里的「查看详情」当成商品卡，去点背后信息流的「下一条」箭头。
+    if (D.isOverlayVideo(video)) return;
 
     // 抖音会把相邻视频预加载在 DOM 里，判错就会把正常视频切走。
     // 传进来的不是当前在播的那条时，改判在播的那条，并让本轮重新开始。
@@ -296,7 +361,7 @@
       video = cur;
       st.gen = -1;
     }
-    if (!D.inFeed(video)) return;
+    if (D.isOverlayVideo(video)) return;
 
     // 换了视频就重置判定状态（用代次，不用 duration/src —— 它们经常是 Infinity/空串）
     if (D.gen !== st.gen) st = { gen: D.gen, passes: 0, blocked: false, last: 0 };

@@ -218,8 +218,11 @@
   D.nav = {
     apply() {
       const nav = navOf();
-      // 左侧导航在所有页面都精简（收藏、我的、搜索……），不再只限视频流页面；
-      // 页面晚渲染时靠下面的有上限重试补齐。
+      if (!document.documentElement.classList.contains('dyc-feed')) {
+        clearMarks();
+        clearForced();
+        return;
+      }
       const hidden = fullHidden();
       document.documentElement.classList.toggle('dyc-nav-hidden', hidden);
       clearMarks();
