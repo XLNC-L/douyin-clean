@@ -15,7 +15,7 @@
   'use strict';
 
   const D = (window.__DYC = {
-    VER: '1.9.9',
+    VER: '1.9.10',
     debug: false,
 
     // 视频代次：每换一条视频 +1。
@@ -136,6 +136,47 @@
     if (v.closest('aside')) return false;     // 私信 / 消息抽屉
     return true;
   };
+
+  // 私信 / 消息抽屉是否打开：抽屉是 aside，且里面有真正显示出来的视频。
+  // 不用"任意 aside"判断 —— 评论区 / 其他右侧面板也会是 aside。
+  D.imOpen = () => {
+    for (const a of document.querySelectorAll('aside')) {
+      if (a.closest(D.FEED_CARD_SEL)) continue;
+      const ar = a.getBoundingClientRect();
+      if (ar.width < 260 || ar.height < 300) continue;
+      if (ar.right <= 0 || ar.bottom <= 0 || ar.left >= window.innerWidth || ar.top >= window.innerHeight) continue;
+      for (const v of a.querySelectorAll('video')) {
+        const r = v.getBoundingClientRect();
+        if (r.width >= 160 && r.height >= 100) return true;
+      }
+    }
+    return false;
+  };
+
+  // 前台的非信息流视频（好友分享弹层 / 私信视频）。小尺寸悬停预览不算，
+  // 否则鼠标滑过右侧预览就会把信息流暂停。
+  D.foreignForeground = () => {
+    let best = null;
+    let bestA = 0;
+    for (const v of document.querySelectorAll('video')) {
+      if (D.inFeed(v)) continue;
+      const r = v.getBoundingClientRect();
+      const w = Math.min(r.right, window.innerWidth) - Math.max(r.left, 0);
+      const h = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0);
+      if (w < 280 || h < 200) continue;
+      const a = w * h;
+      // 弹层 / 抽屉里的视频即使小一点也算前台；普通的小预览必须足够大，
+      // 避免鼠标划过右侧悬停预览就把信息流暂停。
+      const host = v.closest('aside, [role="dialog"], [data-e2e*="modal"], [class*="modal"], [class*="Modal"], [class*="drawer"]');
+      if (!host && a < 160000) continue;
+      if (a > bestA) { bestA = a; best = v; }
+    }
+    return bestA >= 100000 ? best : null;
+  };
+
+  // 好友视频 / 私信抽屉打开时，扩展应让位：暂停背后的信息流，
+  // 但不要过滤、不要调清晰度、不要标记浮层，也不要暂停前台这条视频。
+  D.overlayContext = () => D.imOpen() || !!D.foreignForeground();
 
   // 两个矩形是否相邻/相交（pad 为额外容差）
   D.near = (a, b, pad = 40) => !!a && !!b &&

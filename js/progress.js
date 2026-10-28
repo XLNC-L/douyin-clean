@@ -265,6 +265,8 @@
       if (!enabled() || !html.classList.contains('dyc-feed')) return;
 
       if (v !== video) {
+        // 好友视频 / 私信抽屉在前台时不改挂线条：背后的信息流线条保持原样
+        if (D.overlayContext()) return;
         // 预加载 / 残留的邻接视频一律不接管：只有"当前屏幕上这张卡片"的那条才配挂线条
         if (visibleVideo(v) !== v) return;
         if (!ensure(v)) return;
