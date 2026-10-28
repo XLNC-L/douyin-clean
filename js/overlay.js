@@ -434,7 +434,7 @@
     }
 
     const v = video || D.playingVideo();
-    if (!v) return;
+    if (!v || !D.inFeed(v)) return;
     const vr = v.getBoundingClientRect();
     if (!vr.width || !vr.height) return;
 
@@ -560,7 +560,7 @@
       if (tickLeft <= 0) return;            // 每个视频最多补标 6 次（约 12 秒）
       tickLeft--;
       const v = activeVideo() || currentVideo || D.playingVideo();
-      if (!v || !v.isConnected) return;
+      if (!v || !v.isConnected || !D.inFeed(v)) return;
       const vr = v.getBoundingClientRect();
       if (!vr.width || !vr.height) return;
       if (!gameDone) markGame(v, vr);

@@ -56,7 +56,7 @@
     D.nav.apply();
     D.header.apply();
     const v = D.playingVideo();
-    if (v) {
+    if (v && D.inFeed(v)) {
       lastVideo = v;
       D.overlay.sync(v);
       D.progress.attach(v);
@@ -145,6 +145,13 @@
 
   function onNewVideo(v) {
     if (!v) return;
+    // 私信 / 好友分享 / 其他弹层里的视频：不参与信息流逻辑。
+    // 以前会当成换了一条信息流视频，广告判定可能点到背后的「下一条」箭头，
+    // 表现为"点开好友视频，原来的视频不暂停，反而滑到下一条"。
+    if (!D.inFeed(v)) {
+      if (!v.paused) pauseFeed(v);
+      return;
+    }
     bumpGen(v);
     lastVideo = v;
     lastSrc = srcOf(v);
@@ -187,11 +194,11 @@
       const sig = v.paused ? '' : videoSig(v);
       if (v !== lastVideo || (sig && sig !== lastSig)) onNewVideo(v);
       // 播放器重渲染 / 暂停期间可能把自绘进度条清掉；这里只做幂等补挂，没有就重建
-      if (D.progress) D.progress.sync(v);
+      if (D.progress && D.inFeed(v)) D.progress.sync(v);
     }
     pauseOthers();                  // 兜住"上一条还在出声"：每秒级复核一次
     if (D.overlay && D.overlay.tick) D.overlay.tick();  // 游戏 / 推荐卡片可能晚于视频渲染
-    D.filter.closePopups(v);        // 顺手关掉头像旁的直播/推广小窗
+    if (v && D.inFeed(v)) D.filter.closePopups(v);      // 弹层在前台时别去关它里面的按钮
   }, 2000);
 
   // ---------- 同一时间只让一条视频出声 ----------
@@ -211,14 +218,30 @@
     return D.onScreenVideo ? D.onScreenVideo() : D.playingVideo();
   }
 
-  const FEED_CARD_SEL = '[data-e2e="feed-item"], [data-e2e="feed-active-video"], .slider-video';
+  const FEED_CARD_SEL = D.FEED_CARD_SEL;
+
+  // 私信 / 好友分享弹层起播时，把背后的信息流视频全部暂停。
+  // 只认信息流卡片里的视频，不碰同层的小预览播放器。
+  function pauseFeed(except) {
+    for (const v of document.querySelectorAll('video')) {
+      if (v === except || v.paused || v.ended || !D.inFeed(v)) continue;
+      try { v.pause(); } catch (e) { /* 忽略 */ }
+    }
+  }
 
   function pauseOthers(except) {
     if (!html.classList.contains('dyc-feed')) return;
+    // 私信 / 分享弹层里的视频在前台时：信息流后台视频全部暂停，
+    // 但不要把弹层自己的视频当成"残留视频"按停。
+    const fg = D.onScreenVideo ? D.onScreenVideo() : null;
+    if (fg && !D.inFeed(fg) && !fg.paused) {
+      pauseFeed(fg);
+      return;
+    }
     const list = document.querySelectorAll('video');
     if (list.length < 2) return;
     const active = activeEl();
-    if (!active) return;
+    if (!active || !D.inFeed(active)) return;
     for (const v of list) {
       // except = 刚触发 playing 的那条：无论如何都不动它，
       // 避免切换瞬间 feed-active-video 还没更新，把刚起播的新视频按停。
