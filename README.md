@@ -5,11 +5,20 @@
 ![manifest](https://img.shields.io/badge/Manifest-V3-4285F4)
 ![platform](https://img.shields.io/badge/Chrome-Desktop-34A853)
 
-当前版本：v1.9.12 · [下载 / Releases](https://github.com/XLNC-L/douyin-clean/releases) · [更新日志](CHANGELOG.md)
+当前版本：v1.9.13 · [下载 / Releases](https://github.com/XLNC-L/douyin-clean/releases) · [更新日志](CHANGELOG.md)
 
 ![界面示意：左为默认界面，右为启用扩展后](docs/preview.svg)
 
 一个针对**网页版抖音**（`www.douyin.com`）的 Chrome 扩展：**自动最高清晰度**、**带货广告自动跳过**、**失焦暂停**、**纯净布局**、**视频底部进度细线**，所有功能都能在扩展面板里分项开关。不做列表轮询、不全站监听、不删 DOM 节点 —— 刷视频不卡。
+
+## 最新变化（v1.9.13）
+
+这版是真机（`www.douyin.com/video/...` 详情页）实测后修的，四个问题都复现并验证过：
+
+- **快进快退不同步**：真机复现——seek 的瞬间 `video.duration` 会短暂变成 `NaN`，旧逻辑退回 `seekable` 估算总时长，把"已缓冲到哪"当成总时长，143s/286s 的 50% 被画成 67%、57s 被画成 91%。现在会沿用上一次读到的有效时长；
+- **暂停后被自动恢复播放**：`quality.js` 等清晰度爬升时有句"换流期间可能自动暂停，顺手恢复"，用的是进入循环前的 `wasPlaying`，用户中途暂停也会被 `play()` 回来。改成只在 `seeking` / 未缓冲好时才恢复；
+- **暂停后莫名跳下一条**：暂停时不判定、不跳转（暂停层常带商品 / 推荐文案，容易被误判成带货）；
+- **线条掉到画面外**：真机播放器根是 `basePlayerContainer`（不是 `.xgplayer`），容器比 `<video>` 高 48px（控制条区域），`bottom:0` 会让线条落到画面下方。现在按 `<video>` 实际矩形对齐 left / width / bottom。
 
 ## 最新变化（v1.9.12）
 

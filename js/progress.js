@@ -43,10 +43,12 @@
   let lastPct = -1;
   let lastTime = -1;        // 上次画线时的 currentTime：用来发现"回到开头 / 往回拖"
   let idAt = 0;             // 目标视频复核时刻
+  let alignAt = 0;          // 线条与视频画面的对齐时刻
   let endedTimers = [];     // 播放结束后的兜底重画
   let unknown = null;       // null=尚未判定；true/false=当前线条是否因时长未知而隐藏
   let effDur = NaN;         // 有效时长（duration 不是有限值时的兜底）
   let effAt = 0;            // 兜底时长的取样时刻，最多每秒读一次布局
+  let lastGoodDur = NaN;    // 上一次读到的有效 duration，用于抵消 seek 瞬间的 NaN
 
   const enabled = () => !D.settings || D.settings.progress !== false;
 
@@ -76,8 +78,30 @@
     rafId = 0;
     if (!enabled() || !html.classList.contains('dyc-feed')) return;
     retarget();                        // 每 120ms 确认一次"线条该挂在哪条视频上"
-    if (bar && video && !document.hidden) paint();
+    if (bar && video) {
+      alignBar();                      // 每 400ms 对齐一次视频实际画面
+      if (!document.hidden) paint();
+    }
     if (!rafId) rafId = requestAnimationFrame(loop);
+  }
+
+  // 线条要贴在"视频画面"的底边，而不是播放器容器的底边 ——
+  // 真机实测：容器（basePlayerContainer）比 <video> 高 48px，那 48px 是控制条区域，
+  // 直接 bottom:0 会让线条掉到画面下面去。这里按 video 的实际矩形算 left/width/bottom。
+  function alignBar() {
+    if (!bar || !video || !host) return;
+    const now = performance.now();
+    if (now - alignAt < 400) return;
+    alignAt = now;
+    const hr = host.getBoundingClientRect();
+    const vr = video.getBoundingClientRect();
+    if (!hr.width || !vr.width) return;
+    const left = Math.max(0, Math.round(vr.left - hr.left)) + 'px';
+    const width = Math.max(1, Math.round(Math.min(vr.width, hr.width))) + 'px';
+    const bottom = Math.max(0, Math.round(hr.bottom - vr.bottom)) + 'px';
+    if (bar.style.left !== left) bar.style.left = left;
+    if (bar.style.width !== width) bar.style.width = width;
+    if (bar.style.bottom !== bottom) bar.style.bottom = bottom;
   }
 
   function startLoop() {
@@ -164,11 +188,12 @@
     mirrorSince = 0;
     mirrorCt = 0;
     mirrorOff = false;
+    lastGoodDur = NaN;          // 换视频了，旧的时长不能再用
   }
 
   function readMirror() {
     if (mirrorOff || !video) return NaN;
-    const box = host || video.closest('.xgplayer, .douyin-player');
+    const box = host || video.closest(D.PLAYER_SEL);
     if (!box) return NaN;
     const el = box.querySelector(PROGRESS_SEL);
     if (!el) return NaN;
@@ -252,7 +277,7 @@
   }
 
   function fallbackDuration(v) {
-    const box = v.closest('.xgplayer, .douyin-player') || v.parentElement;
+    const box = v.closest(D.PLAYER_SEL) || v.parentElement;
     if (!box) return NaN;
 
     // 直播：控制条里的 .time-live-tag 会从 display:none 变成显示
@@ -290,7 +315,15 @@
   // 立刻重采样，不让线条卡在 100%。
   function durationOf(v) {
     const d = v.duration;
-    if (isFinite(d) && d > 0 && d < 86400) return d;
+    if (isFinite(d) && d > 0 && d < 86400) {
+      lastGoodDur = d;                       // 记下有效值：seek 瞬间 duration 会短暂变成 NaN
+      return d;
+    }
+    // 真机实测（详情页 seek）：MSE 流在 seek 的一瞬间 duration 会变成 NaN，
+    // 这时如果退回 seekable 估算，会把"已缓冲到哪"当成总时长 ——
+    // 143s/286s 的 50% 会被画成 67%，57s 会被画成 91%，线条完全对不上。
+    // 所以只要曾经拿到过有效时长，就沿用它。
+    if (isFinite(lastGoodDur) && lastGoodDur > 0) return lastGoodDur;
     const now = performance.now();
     const cur = isFinite(v.currentTime) ? v.currentTime : 0;
     const stale = !(effDur > 0) || cur > effDur + 1;
@@ -325,7 +358,7 @@
 
   // 播放器重渲染（开评论、切布局）会把我们的节点一起清掉：重新挂到新宿主上
   function ensure(v) {
-    const nextHost = v.closest('.xgplayer, .douyin-player') || v.parentElement;
+    const nextHost = v.closest(D.PLAYER_SEL) || v.parentElement;
     if (!nextHost) return false;
     if (video === v && host === nextHost && bar && bar.isConnected) return true;
 
@@ -346,6 +379,8 @@
     bar.className = 'dyc-progress';
     bar.setAttribute('data-dyc-progress', '');
     bar.setAttribute('aria-hidden', 'true');
+    bar.style.right = 'auto';          // 用 left + width 对齐视频画面，不再依赖 right
+    alignAt = 0;
     fill = document.createElement('div');
     fill.className = 'dyc-progress-fill';
     fill.style.transform = 'scaleX(0)';
@@ -426,6 +461,9 @@
         effDur = NaN;
         effAt = 0;
         lastTime = -1;
+        // 换片 / 换源：旧时长作废；但 durationchange 在 seek 过程中也会触发（值可能是 NaN），
+        // 所以只在 loadedmetadata / emptied 这两个"真的换了源"的事件里清空。
+        if (type !== 'durationchange') lastGoodDur = NaN;
       }
 
       if (!bar || !bar.isConnected) {
@@ -543,7 +581,7 @@
       startLoop();
       const target = targetVideo(v);
       if (!target) return;
-      const nextHost = target.closest('.xgplayer, .douyin-player') || target.parentElement;
+      const nextHost = target.closest(D.PLAYER_SEL) || target.parentElement;
       if (video === target && host === nextHost && bar && bar.isConnected) {
         paint();                 // 顺带补一帧：暂停时也能把最新位置画出来
         return;

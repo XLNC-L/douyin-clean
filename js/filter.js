@@ -307,6 +307,8 @@
   // blocked 一置真就再也不试，于是那条带货视频会一直播下去。
   function next(video, depth) {
     const d = depth || 0;
+    // 用户暂停了就别跳：暂停状态下切走视频，观感就是"暂停被取消并划到下一条"
+    if (video && video.paused) return;
     // 节流只作用于"首次尝试"，复核后的重试与降级递归必须能继续执行
     if (d === 0) {
       const now = Date.now();
@@ -350,6 +352,9 @@
     if (!enabled() && !liveEnabled()) return;
     if (!document.documentElement.classList.contains('dyc-feed')) return;
     if (!video.isConnected) return;
+    // 用户主动暂停时不判定、不跳下一条：暂停层常带"相关推荐 / 商品卡"，
+    // 很容易被当成带货；而且暂停状态下切走视频就是"暂停被莫名其妙取消"的观感。
+    if (video.paused) return;
     // 聊天页 / 私信抽屉 / 好友分享弹层里的播放器不参与广告判定：
     // 否则会把弹层里的「查看详情」当成商品卡，去点背后信息流的「下一条」箭头。
     if (D.isOverlayVideo(video)) return;

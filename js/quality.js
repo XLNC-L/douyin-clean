@@ -212,8 +212,11 @@
       after = actualMax(v);
       if (nom > 0 && after >= nom * 0.9) return after;
       if (got4K) return after;
-      // 换流期间播放器可能自动暂停，顺手恢复
-      if (wasPlaying && v.paused) {
+      // 换流期间播放器可能自动暂停，顺手恢复。
+      // 但**只恢复"换流导致的暂停"**：判据是还在 seeking / 没缓冲好。
+      // 以前只看 wasPlaying（进入循环前的状态），用户中途点了暂停也会被 play() 回来 ——
+      // 表现就是"暂停后莫名又开始播"。
+      if (wasPlaying && v.paused && (v.seeking || v.readyState < 3)) {
         try { await v.play(); } catch (e) { /* 忽略 */ }
       }
     }

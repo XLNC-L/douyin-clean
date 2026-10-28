@@ -15,7 +15,7 @@
   'use strict';
 
   const D = (window.__DYC = {
-    VER: '1.9.12',
+    VER: '1.9.13',
     debug: false,
 
     // 视频代次：每换一条视频 +1。
@@ -106,6 +106,11 @@
   // 后者一旦被当成信息流视频，就会出现"点开好友视频，原来的推荐视频不暂停，
   // 反而被广告判定点到背后的下一条箭头"。
   D.FEED_CARD_SEL = '[data-e2e="feed-item"], [data-e2e="feed-active-video"], .slider-video';
+
+  // 播放器根节点。真机（2026-10）上抖音详情页的播放器根是
+  // 「xgpUb0ay basePlayerContainer ...」这类哈希类名，**不带 .xgplayer / .douyin-player**，
+  // 只按旧选择器会退回到 <video> 的父节点，进度线/控制条的位置就不对了。
+  D.PLAYER_SEL = '.xgplayer, .douyin-player, [class*="basePlayerContainer" i], [class*="playerContainer" i]';
 
   // 聊天页 / 私信抽屉 / 弹层容器。只用来判断"这条视频是不是压在信息流上面的前台播放器"，
   // 不参与隐藏逻辑（aside 里还有右侧面板，不能整类动）。
