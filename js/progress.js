@@ -4,10 +4,10 @@
  * 播放器缩放、开评论区、全屏时都会跟着走，不需要读几何、不需要跟随 resize。
  *
  * 更新方式（v1.9.11 重做，合并上一版"逐帧读 currentTime"的做法）：
- *   requestAnimationFrame 循环 —— 只要视频在播 / 在 seek / 刚 seek 完，就每帧读一次
- *   video.currentTime 写 transform: scaleX()。这是唯一驱动，不再依赖
- *   requestVideoFrameCallback：rVFC 只在"有新画面呈现"时回调，拖动进度条、跳转、
- *   切清晰度、页面不可见时都可能长时间不回调，回调链一断线条就只剩 4Hz 的 timeupdate，
+ *   requestAnimationFrame 循环 —— 线条挂着就一直每帧读一次 video.currentTime 写
+ *   transform: scaleX()。这是唯一驱动，不再依赖 requestVideoFrameCallback：
+ *   rVFC 只在"有新画面呈现"时回调，拖动进度条、跳转、切清晰度、页面不可见时都可能
+ *   长时间不回调，回调链一断线条就只剩 4Hz 的 timeupdate，
  *   看起来就是"只会匀速走、快进快退和跳转都没反应"。
  *   媒体事件（timeupdate / seeking / seeked / ended / ratechange …）仍然保留，
  *   用于即时对齐和兜底，事件与循环写的是同一个 paint()。
@@ -19,8 +19,10 @@
  * 另外三个容易翻车的点：
  *   · 播完"从头播放"不稳定：抖音可能是 loop 属性，也可能是 JS 里 seek 回 0，
  *     后者不保证触发 play / seeking。ended 之后补三次兜底重画，currentTime 变小时也强制重画；
- *   · 拖动进度条时视频常常是暂停的：seeking 之后留 1.2 秒"跟随窗口"，
- *     这期间循环继续跑，松手前的每一帧都能跟上；
+ *   · 拖动进度条时视频常常是暂停的，而且抖音不保证触发 seeking / timeupdate：
+ *     循环干脆一直跑（页面不可见时 rAF 自己会停），任何一次 currentTime 变化都能跟上；
+ *   · 时长兜底值可能比当前位置还小（读到了"当前时间"而不是总时长）：这种值直接丢弃，
+ *     否则线条会一直卡在 100%，看起来就像"这条视频不跟进度"；
  *   · 线条挂错视频：每秒复核一次，目标视频被换掉 / 移出 DOM 时改挂当前活动卡片。
  *
  * 直播 / duration 未知（MSE 流）时整条隐藏：这类视频没有可用的播放进度。
@@ -38,7 +40,6 @@
   let host = null;
   let video = null;
   let rafId = 0;
-  let seekUntil = 0;        // seek 跟随窗口的截止时刻
   let lastPct = -1;
   let lastTime = -1;        // 上次画线时的 currentTime：用来发现"回到开头 / 往回拖"
   let idAt = 0;             // 目标视频复核时刻
@@ -66,21 +67,17 @@
     rafId = 0;
   }
 
-  // 什么时候还需要继续排帧：
-  //   在播（含倍速）→ 要跟；正在 seek → 要跟；刚 seek 完 1.2 秒内 → 继续跟。
-  function keepLooping() {
-    if (!video || !bar) return false;
-    if (!video.paused && !video.ended) return true;
-    if (video.seeking) return true;
-    return performance.now() < seekUntil;
-  }
-
+  // 循环一直跑（页面不可见时 rAF 自己会停），而不是"只在播放时跑"。
+  // 原因：抖音的拖动 / 跳转 / 切清晰度并不保证触发 seeking / timeupdate，
+  // 按事件开关循环会漏掉一部分视频 —— 表现就是"有的视频能同步快进快退，有的却不动"。
+  // 每帧只读一次 currentTime 并与上次比较，值没变就什么都不写，
+  // 一帧的开销是两次属性读取，远小于一次样式计算。
   function loop() {
     rafId = 0;
     if (!bar || !video || !enabled()) return;
-    paint();
+    if (!document.hidden) paint();
     followActive();
-    if (!rafId && keepLooping()) rafId = requestAnimationFrame(loop);
+    if (!rafId) rafId = requestAnimationFrame(loop);
   }
 
   function startLoop() {
@@ -137,6 +134,17 @@
   // 抖音很多 MSE 流的 video.duration 是 Infinity / NaN；这时用播放器时间显示里的总时长
   // 或 seekable 区间兜底，否则这些视频的进度条会一直消失 / 算错。
   // 直播返回 NaN，整条隐藏。
+  // 「00:35」「1:02:03」「00:12/00:35」都按最后一段解析成秒
+  function parseClock(text) {
+    if (!text) return NaN;
+    const tail = String(text).split('/').pop().replace(/\s+/g, '').trim();
+    const nums = tail.split(':').map(Number);
+    if (nums.length < 2 || nums.length > 3 || !nums.every(n => isFinite(n))) return NaN;
+    return nums.length === 3
+      ? nums[0] * 3600 + nums[1] * 60 + nums[2]
+      : nums[0] * 60 + nums[1];
+  }
+
   function fallbackDuration(v) {
     const box = v.closest('.xgplayer, .douyin-player') || v.parentElement;
     if (!box) return NaN;
@@ -149,24 +157,22 @@
           liveTag.getBoundingClientRect().width > 0) return NaN;
     }
 
-    // ① 播放器自己的总时长文案最接近真实时长（seekable 可能只到已缓冲位置）
-    const el = box.querySelector('.time-duration');
-    const text = el ? el.textContent.replace(/\s+/g, '').trim() : '';
-    if (text) {
-      const parts = text.split(':').map(Number);
-      if (parts.length >= 2 && parts.length <= 3 && parts.every(n => isFinite(n))) {
-        const sec = parts.length === 3
-          ? parts[0] * 3600 + parts[1] * 60 + parts[2]
-          : parts[0] * 60 + parts[1];
-        if (sec > 0) return sec;
-      }
+    const cur = isFinite(v.currentTime) ? v.currentTime : 0;
+
+    // ① 播放器自己的总时长文案最接近真实时长（seekable 可能只到已缓冲位置）。
+    //    注意有的版本 .time-duration 显示的是"当前时间"而不是总时长：
+    //    总时长一定 >= 当前位置，比当前位置还小的直接丢弃，否则线条会一直卡在 100%。
+    for (const sel of ['.time-total', '[class*="time-total"]', '.time-duration', '[class*="duration"]']) {
+      const el = box.querySelector(sel);
+      const sec = parseClock(el ? el.textContent : '');
+      if (sec > 0 && sec + 1 >= cur) return sec;
     }
 
     // ② MSE 点播常见：duration 为 Infinity，但 seekable 末端就是真实时长
     const s = v.seekable;
     if (s && s.length) {
       const end = s.end(s.length - 1);
-      if (isFinite(end) && end > 0) return end;
+      if (isFinite(end) && end > 0 && end + 1 >= cur) return end;
     }
     return NaN;
   }
@@ -174,11 +180,15 @@
   // 正常视频直接用 video.duration，不读布局；只有时长不是有限值时才走兜底，
   // 并且最多每秒取样一次，避免逐帧查询 DOM。兜底值按最大值累积，
   // 防止 seekable 只覆盖已缓冲区间时把进度算得忽快忽慢。
+  // 例外：兜底值比当前位置还小（说明过期的估算 / 跳到了未缓冲区间），
+  // 立刻重采样，不让线条卡在 100%。
   function durationOf(v) {
     const d = v.duration;
     if (isFinite(d) && d > 0 && d < 86400) return d;
     const now = performance.now();
-    if (now - effAt < 1000) return effDur;
+    const cur = isFinite(v.currentTime) ? v.currentTime : 0;
+    const stale = !(effDur > 0) || cur > effDur + 1;
+    if (now - effAt < 1000 && !stale) return effDur;
     effAt = now;
     const fb = fallbackDuration(v);
     if (!isFinite(fb) || fb <= 0) return effDur;
@@ -330,16 +340,14 @@
       }
 
       // seek 相关的三个事件都要即时对齐：拖动 / 点击跳转时，事件可能早于
-      // 实际时间更新，所以除了立刻画一帧，还要开一个 1.2 秒的跟随窗口。
+      // 实际时间更新，所以除了立刻画一帧，还要确保逐帧循环在跑。
       if (type === 'seeking') {
-        seekUntil = performance.now() + 1200;
         lastTime = -1;
         paint(true);
         startLoop();
         return;
       }
       if (type === 'seeked') {
-        seekUntil = performance.now() + 300;
         lastTime = -1;
         paint(true);
         startLoop();
