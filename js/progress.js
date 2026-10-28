@@ -85,9 +85,8 @@
     if (!rafId) rafId = requestAnimationFrame(loop);
   }
 
-  // 线条要贴在"视频画面"的底边，而不是播放器容器的底边 ——
-  // 真机实测：容器（basePlayerContainer）比 <video> 高 48px，那 48px 是控制条区域，
-  // 直接 bottom:0 会让线条掉到画面下面去。这里按 video 的实际矩形算 left/width/bottom。
+  // 线条只做水平对齐：宽度/左边跟视频画面一致，垂直方向仍然贴播放器容器底部
+  // （真机上调到视频底边会悬在控制条上方，看起来像"飘起来了"，用户反馈不好看）。
   function alignBar() {
     if (!bar || !video || !host) return;
     const now = performance.now();
@@ -98,10 +97,9 @@
     if (!hr.width || !vr.width) return;
     const left = Math.max(0, Math.round(vr.left - hr.left)) + 'px';
     const width = Math.max(1, Math.round(Math.min(vr.width, hr.width))) + 'px';
-    const bottom = Math.max(0, Math.round(hr.bottom - vr.bottom)) + 'px';
     if (bar.style.left !== left) bar.style.left = left;
     if (bar.style.width !== width) bar.style.width = width;
-    if (bar.style.bottom !== bottom) bar.style.bottom = bottom;
+    if (bar.style.bottom !== '0px') bar.style.bottom = '0px';
   }
 
   function startLoop() {
@@ -171,7 +169,14 @@
   // 我们的线条本质上是"复述"播放进度。抖音的播放器有 MSE / 虚拟时间轴 / 特殊 seek 等情况，
   // 个别视频上 video.currentTime 与用户看到的进度会不一致，这时直接读它自己的进度条更准。
   // 只读 style 上的 transform / width（不触发布局），最多每 200ms 取一次。
-  const PROGRESS_SEL = '[class*="progress-played"], [class*="progress-inner"], [class*="progress-current"]';
+  // 真机实测（xgplayer，2026-10）结构：
+  //   .xgplayer-progress > .xgplayer-progress-outer > .progress-list > .xgplayer-progress-inner
+  //      ├─ .xgplayer-progress-cache   （缓冲，style.width: 8.1%）
+  //      └─ .xgplayer-progress-played  （已播，style.width: 2.1%）  ← 真实进度
+  // 注意：-inner 是容器，宽度恒等于父级（100%），绝不能拿它当进度；
+  // 以前选择器里带了 progress-inner 且 querySelector 按文档序取第一个，
+  // 正好取到容器，镜像值永远是 100%，看起来就是"这条视频不跟进度"。
+  const PROGRESS_SEL = '[class*="progress-played"], [class*="progress-current"], [class*="played-progress"]';
   let mirrorAt = 0;
   let mirrorVal = NaN;
   let mirrorLast = NaN;
@@ -197,11 +202,15 @@
     if (!box) return NaN;
     const el = box.querySelector(PROGRESS_SEL);
     if (!el) return NaN;
+    // xgplayer 用 style.width 百分比；也有播放器用 transform: scaleX()
+    const w = el.style.width || '';
+    if (/%\s*$/.test(w)) {
+      const n = parseFloat(w);
+      if (isFinite(n)) return clamp01(n / 100);
+    }
     const tf = el.style.transform || '';
     const m = /scaleX\(\s*([\d.]+)\s*\)/.exec(tf);
     if (m) return clamp01(parseFloat(m[1]));
-    const w = el.style.width || '';
-    if (/%\s*$/.test(w)) return clamp01(parseFloat(w) / 100);
     // 最后退回几何（最多 5 次/秒，代价可接受）
     const p = el.parentElement;
     if (!p) return NaN;
@@ -233,22 +242,33 @@
 
   function paint(force) {
     if (!bar || !video) return;
-    const d = durationOf(video);
-    const cur = video.ended ? d : video.currentTime;
+    const cur = video.currentTime;
+    const d = video.duration;
     let ratio;
-    if (isFinite(d) && d > 0) {
-      // 时长已知：currentTime / duration 就是准确值，不折腾
+    if (isFinite(d) && d > 0 && d < 86400) {
+      lastGoodDur = d;
       ratio = clamp01(cur / d);
       setUnknown(false);
-    } else {
-      // 时长未知（MSE 流）：优先镜像抖音自己的进度条，读不到才判为"未知"整条隐藏
-      const nr = mirrorRatio();
-      if (!isFinite(nr)) {
-        setUnknown(true);
-        return;
-      }
-      ratio = nr;
+    } else if (isFinite(lastGoodDur) && lastGoodDur > 0) {
+      // seek / 切流瞬间 duration 会短暂变成 NaN：沿用上一次的有效值
+      ratio = clamp01(cur / lastGoodDur);
       setUnknown(false);
+    } else {
+      // 这条视频从一开始就是 Infinity（MSE 直播式流）：镜像播放器自己的进度条
+      const nr = mirrorRatio();
+      if (isFinite(nr)) {
+        ratio = nr;
+        setUnknown(false);
+      } else {
+        const fb = fallbackDuration(video);
+        if (isFinite(fb) && fb > 0) {
+          ratio = clamp01(cur / fb);
+          setUnknown(false);
+        } else {
+          setUnknown(true);
+          return;
+        }
+      }
     }
     // 循环播放 / 拖回开头：currentTime 明显变小，说明已经重新开始或往回跳了。
     // 必须强制重画，否则线条会一直停在 100% 等下一帧 ——

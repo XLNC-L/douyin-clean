@@ -1,3 +1,22 @@
+## 抖音净播 v1.9.14
+
+真机 dump 出播放器进度条结构后，定位到「进度条不跟 seek」的真凶。
+
+### 修复
+
+- **镜像取错元素**：`xgplayer-progress-inner` 是容器（宽度恒为 100%），真实进度在 `.xgplayer-progress-played` 的 `style.width` 上。旧选择器先命中容器，镜像值永远 100%，再叠加 `duration = Infinity`，线条就彻底不跟。现在只认 `progress-played` / `progress-current`，并先读 `width` 百分比再读 `scaleX`；
+- **判定顺序重排**：有限 duration → 上次有效时长（抵消 seek 瞬间的 NaN）→ 镜像原生进度 → 时间文案 / seekable 兜底；
+- **位置改回贴播放器底部**：上一版按视频底边对齐会悬在控制条上方，像飘起来；现在垂直回到底部，只保留水平对齐。
+
+### 验证（真机）
+
+- 有限时长 seek 45% → 线条 45.1%；
+- 强制 `duration = Infinity` 后 seek 60s → 24.6%、seek 180s → 73.2%，与原生进度一致。
+
+### 安装 / 升级
+
+下载下方 `douyin-clean-v1.9.14.zip` → 解压覆盖原来的扩展目录 → 打开 `chrome://extensions` 点该扩展的刷新 → 刷新抖音页面。
+
 ## 抖音净播 v1.9.13
 
 这版是在真机（抖音网页版视频详情页）上实测后修的，四个问题都复现并验证过。

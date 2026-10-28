@@ -5,11 +5,17 @@
 ![manifest](https://img.shields.io/badge/Manifest-V3-4285F4)
 ![platform](https://img.shields.io/badge/Chrome-Desktop-34A853)
 
-当前版本：v1.9.13 · [下载 / Releases](https://github.com/XLNC-L/douyin-clean/releases) · [更新日志](CHANGELOG.md)
+当前版本：v1.9.14 · [下载 / Releases](https://github.com/XLNC-L/douyin-clean/releases) · [更新日志](CHANGELOG.md)
 
 ![界面示意：左为默认界面，右为启用扩展后](docs/preview.svg)
 
 一个针对**网页版抖音**（`www.douyin.com`）的 Chrome 扩展：**自动最高清晰度**、**带货广告自动跳过**、**失焦暂停**、**纯净布局**、**视频底部进度细线**，所有功能都能在扩展面板里分项开关。不做列表轮询、不全站监听、不删 DOM 节点 —— 刷视频不卡。
+
+## 最新变化（v1.9.14）
+
+- **镜像取错了元素（进度不跟 seek 的真凶）**：真机 dump 出播放器结构——`xgplayer-progress-inner` 是**容器**（宽度恒等于父级 100%），真实进度在 `.xgplayer-progress-played` 的 `style.width` 上（例如 `2.1%`）。旧选择器把 `progress-inner` 也算了进去，`querySelector` 按文档序先取到容器，镜像值永远 100%，`duration` 又是 `Infinity`，于是线条彻底不跟；
+- 现在只认 `progress-played` / `progress-current`，并且**先读 `style.width` 百分比**再读 `scaleX`；真机模拟 `duration=Infinity` 验证：seek 到 60s 线条 24.6%、180s 线条 73.2%，与原生进度一致；
+- **位置改回贴播放器底部**（上一版按视频底边对齐会悬在控制条上方，视觉上像飘起来了）。
 
 ## 最新变化（v1.9.13）
 
