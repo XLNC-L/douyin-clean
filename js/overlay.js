@@ -262,7 +262,13 @@
     }
   }
 
-  // 画面左下角的游戏卡片（例如「游戏 原神 · 评分高达9.3」）。
+  // 画面左下角的游戏卡片。文案随版本变，实测至少三种：
+  //   「游戏 原神 · 评分高达9.3」「游戏 原神 · 免下载立即玩」「秒玩小游戏」
+  // 以前只认"评分高达"，所以带"免下载立即玩"的那版会一直露在画面上。
+  // 现在统一按"以『游戏』开头 或 带游戏推广话术"识别，再用小尺寸 + 位置排除标题 / 评论。
+  const GAME_TEXT_RE = /^(游戏|小游戏)|(评分高达|免下载|立即玩|秒玩|玩游戏|游戏中心|打开游戏|一键玩)/;
+  const isGameText = t => !!t && t.length <= 60 && GAME_TEXT_RE.test(t);
+
   // 类名同样是哈希，按小尺寸 + 固定文案定位；直接永久隐藏，避免跟着浮层切换时慢半拍。
   function markGame(v, vr) {
     // 优先用整张活动卡：游戏卡片可能挂在播放器外层，cardOf 只到 .slider-video 会漏
@@ -291,13 +297,12 @@
     for (const el of card.querySelectorAll('div, span, a, section')) {
       if (++n > 900) break;
       if (!near(el)) continue;
-      const t = D.textOf(el);
-      if (!t || t.length > 48 || !/评分高达|^游戏.*评分/.test(t)) continue;
+      if (!isGameText(D.textOf(el))) continue;
       let box = el;
       while (box.parentElement && box.parentElement !== card) {
         const p = box.parentElement;
         if (!near(p)) break;
-        if (!/评分高达|^游戏.*评分/.test(D.textOf(p))) break;
+        if (!isGameText(D.textOf(p))) break;
         box = p;
       }
       hidePermanent(box);
