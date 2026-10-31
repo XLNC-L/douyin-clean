@@ -50,6 +50,11 @@
   const SHOP_CTA_RE = /(查看详情|立即购买|去购买|马上抢|加入购物车|领券购买)/;
   // 营销话术：单独出现不算数（标题里也常写"同款"），必须和另一条弱信号同时成立。
   const MARKETING_RE = /(小黄车|购物车|橱窗|同款商品|优惠券|领券|到手价|限时秒杀|点击左下角|左下角链接|商品链接|拍下)/;
+  // 游戏 / 应用推广（2026-10 真机实测）：抖音不给这类视频打广告标，
+  // 而是在画面里挂平台自己的按钮组件 —— semi-button / semi-button-primary，
+  // 文案固定是「点击预约 / 立即预约 / 立即下载 / 打开应用」，旁边配游戏名与 @官方号。
+  // 这类按钮很短、尺寸小、就在画面内，误伤概率极低，所以单独命中即可跳过。
+  const PROMO_CTA_RE = /^(点击预约|立即预约|预约下载|一键预约|立即下载|下载应用|打开应用|去下载)$/;
 
   // 直播卡片与普通视频的区别（2026-10 实测）：
   //   · 播放器容器类名带 LivePlayer_（普通视频是 xgplayer）；
@@ -66,14 +71,19 @@
   const LIVE_MARK_SEL = '[data-e2e*="live-room"], [data-e2e*="livecard"], [data-e2e*="web_live"]';
   const MAX_LIVE_STREAK = 5;     // 连续跳过这么多条直播后先停一下，避免推荐流全是直播时无限切
   let liveStreak = 0;
+  let liveCooldownUntil = 0;     // 直播冷却截止时间：冷却期内不再跳直播，也不重判
   // 抖音复用同一个 <video> 元素播放所有视频，判定状态不能挂在元素上：
   // 元素上的计数一旦用满、或已判成广告，后面所有视频都会被直接放过。
   // 也不能用 duration / currentSrc 当身份：抖音大量视频是 MSE 流，
   // duration 常为 Infinity、currentSrc 常为空串，所有这类视频会撞成同一个 key，
   // 判定次数攒满后整条推荐流都不再检查（历史 bug，表现为"广告从不跳"）。
   // 现在统一用 main.js 维护的代次 D.gen：每换一条视频 +1。
-  let st = { gen: -1, passes: 0, blocked: false, last: 0 };
+  let st = { gen: -1, passes: 0, blocked: false, last: 0, retryAt: 0, firstAt: 0, skipFail: 0 };
   let lastSkip = 0;
+  // 命中但视频处于暂停状态时的"待跳"记录：暂停中不切走（暂停层里常带推荐 / 商品卡，
+  // 切走会让用户觉得"暂停被取消"），但也不能像旧版那样直接放弃并永久 blocked。
+  // 恢复播放后由 main.js 的 2 秒看门狗调用 retryPending() 补跳。
+  let pendingSkip = null;
 
   function cardOf(video) {
     return video.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"], .slider-video') ||
@@ -98,6 +108,18 @@
   // 不再要求元素是叶子节点 —— 购物卡片是"图标 + 购物/ + 商品名"的复合结构，
   // 文本落在带子元素的容器上；也不再限制 3 个字（"购物/厚切吐司面包"就超了）。
   const inInfoBox = el => !!el.closest('.video-info-detail, [data-e2e*="video-info"]');
+
+  // 被浮层自动隐藏的元素（css/content.css 用 opacity:0 + pointer-events:none 收起浮层，
+  // 不改 display/visibility，所以 DOM 和尺寸都还在）。
+  // 含义：商品卡 / 广告标识这类"结构强信号"即使看不见也仍然是广告，照判；
+  // 但价格、购买按钮、"同款"话术这类纯文案弱信号被隐藏时不参与凑数，
+  // 避免"看不见的推荐卡文案"把正常视频判成带货。
+  const hiddenByOverlay = el => {
+    if (!el) return false;
+    const cs = getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden') return true;
+    return parseFloat(cs.opacity || '1') < 0.15;
+  };
 
   function textSignals(root, vr) {
     const out = { strong: '', weak: [] };
@@ -131,14 +153,17 @@
       }
 
       // ③ 价格（弱）：只认"整块文字就是一个价格"的小元素，避免把正文里的 ¥ 算进来
-      if (PRICE_RE.test(t) && t.length <= 12 && boxOk(220, 48)) { weak.add('价格'); continue; }
+      if (PRICE_RE.test(t) && t.length <= 12 && boxOk(220, 48)) { if (!hiddenByOverlay(el)) weak.add('价格'); continue; }
 
       // ④ 购买按钮（弱）：整块文字就是按钮文案
-      if (SHOP_CTA_RE.test(t) && t.length <= 10 && boxOk(240, 56)) { weak.add('购买按钮'); continue; }
+      if (SHOP_CTA_RE.test(t) && t.length <= 10 && boxOk(240, 56)) { if (!hiddenByOverlay(el)) weak.add('购买按钮'); continue; }
+
+      // ④-2 游戏 / 应用推广按钮（强）：平台按钮组件固定文案，单独命中即可
+      if (PROMO_CTA_RE.test(t) && boxOk(300, 64)) { out.strong = '推广按钮(' + t + ')'; return out; }
 
       // ⑤ 营销话术（弱）：标题 / 简介里也常写"同款"，所以排除信息块，且必须另有一条弱信号
       if (!inInfoBox(el) && MARKETING_RE.test(t) && t.length <= 20 && boxOk(300, 60)) {
-        weak.add('营销话术');
+        if (!hiddenByOverlay(el)) weak.add('营销话术');
       }
     }
     out.weak = Array.from(weak);
@@ -175,6 +200,11 @@
   // 必须离视频够近：万一 cardOf 退化成 body，也不会把页面其它位置的店铺链接算进来
   function shopAuthorHit(root, vr) {
     if (!root || !root.querySelectorAll) return '';
+    // ① 作者名本身就是店铺名：抖音的昵称节点是 data-e2e="feed-video-nickname"，
+    //    比遍历 a[href*="/user/"] 的文本可靠得多（头像链接的文本常常是空的）。
+    const nick = root.querySelector('[data-e2e="feed-video-nickname"], .account-name');
+    const nt = nick ? D.textOf(nick).replace(/^@/, '') : '';
+    if (nt && nt.length <= 20 && SHOP_NAME_RE.test(nt)) return '店铺账号';
     let n = 0;
     for (const a of root.querySelectorAll('a[href*="/user/"], [data-e2e*="author" i]')) {
       if (++n > 8) break;
@@ -190,12 +220,69 @@
     return '';
   }
 
+  // 作者名右侧的「广告」标识：抖音官方标注。
+  // 真机实测（2026-10）是 .account 里紧跟昵称的一个 svg：
+  //   <svg width="30" height="16" viewBox="0 0 30 16" style="margin-left:4px">
+  //     <rect rx="2" fill-opacity=".08"/> + 两个字形 path
+  // 没有 aria-label、没有 class，只能靠 viewBox + 尺寸 + 与昵称同行来认。
+  // 这是最权威的"这是广告"信号，命中即跳过；认证 / 蓝V 图标有 class 或 aria，
+  // 这里显式排除，避免把蓝V 视频全部误跳。
+  function adBadgeHit(card) {
+    if (!card || !card.querySelectorAll) return '';
+    const nick = card.querySelector('[data-e2e="feed-video-nickname"], .account-name');
+    if (!nick) return '';
+    const box = nick.closest('.account') || nick.parentElement;
+    if (!box) return '';
+    const nr = nick.getBoundingClientRect();
+    let n = 0;
+    for (const svg of box.querySelectorAll('svg')) {
+      if (++n > 4) break;
+      const r = svg.getBoundingClientRect();
+      if (r.width < 20 || r.width > 40 || r.height < 10 || r.height > 22) continue;
+      const cls = String(svg.getAttribute('class') || '');
+      if (/verify|official|cert|auth/i.test(cls)) continue;
+      const vb = svg.getAttribute('viewBox') || '';
+      if (vb === '0 0 30 16' && Math.abs(r.top - nr.top) <= 14) return '广告标识';
+    }
+    return '';
+  }
+
+  // 电商推广浮层的固定文案（"不容错过的优品 / 商品好评率"）。
+  // 这类浮层不一定带 shop-anchor 类名，但文案是抖音电商组件固定的，可作为兜底。
+  function promoOverlayHit(card) {
+    if (!card || !card.querySelectorAll) return '';
+    // ① 抖音电商素材图：图片托管在电商专属 CDN（p3-aio.ecombdimg.com / ecom-shop-material），
+    //    普通视频不会用这个域名，所以这是比文案更稳的信号。
+    if (card.querySelector('img[src*="ecombdimg"], img[src*="ecom-shop-material"]')) return '电商浮层';
+    // ② 兜底：电商浮层的固定文案
+    let n = 0;
+    for (const el of card.querySelectorAll('span, div')) {
+      if (++n > 400) break;
+      const t = D.textOf(el);
+      if (!t || t.length > 80) continue;
+      if (t.indexOf('不容错过的优品') >= 0 || t.indexOf('商品好评率') >= 0) return '推广浮层';
+    }
+    return '';
+  }
+
   function detect(video) {
     const vr = video.getBoundingClientRect();
     const card = cardOf(video);
 
+    // 0) 手动屏蔽规则（你自己按 Alt+Shift+X 标记过的话题 / 作者），优先级最高
+    const manual = (D.rules && D.rules.match) ? D.rules.match(card) : '';
+    if (manual) return manual;
+
+    // 0-2) 官方「广告」标识：作者名旁的小 svg，最权威，命中即判
+    let hit = adBadgeHit(card);
+    if (hit) return hit;
+
     // 1) 容器语义最稳：商品卡容器 / 广告属性
-    let hit = shopAnchorHit(card, vr) || attrHit(card);
+    hit = shopAnchorHit(card, vr) || attrHit(card);
+    if (hit) return hit;
+
+    // 1-2) 电商推广浮层的固定文案
+    hit = promoOverlayHit(card);
     if (hit) return hit;
 
     // 2) 文本信号：强信号直接判；弱信号要凑够两条不同种类
@@ -269,59 +356,132 @@
     return '';
   }
 
-  // 切下一条。三种手段按顺序兜底，并且**复核是否真的切走了**：
-  // 抖音的"下一条"箭头有时点不动（不可见 / 事件被拦），以前点完就当成功了，
-  // blocked 一置真就再也不试，于是那条带货视频会一直播下去。
-  function next(video, depth) {
-    const d = depth || 0;
-    // 用户暂停了就别跳：暂停状态下切走视频，观感就是"暂停被取消并划到下一条"
-    if (video && video.paused) return;
-    // 节流只作用于"首次尝试"，复核后的重试与降级递归必须能继续执行
-    if (d === 0) {
-      const now = Date.now();
-      if (now - lastSkip < 1500) return;
-      lastSkip = now;
+  // 切下一条。三段式：尝试 -> 复核 -> 升级；三次都失败时不再永久放弃。
+  // 旧版的 bug：第三次尝试后直接 return，而 blocked 已经置 true，
+  // 于是一条"点不动"的视频会一直播到用户手动划走，所有后续判定都被 blocked 挡掉。
+  // 第三层也不再发合成 KeyboardEvent：isTrusted=false，抖音的事件委托不接受，等于没有兜底。
+  const SWITCH_TRIES = 3;
+  const SWITCH_RECHECK = 800;        // 每次尝试后多久复核（抖音换片通常在几百毫秒内完成）
+  const SWITCH_MIN_GAP = 900;        // 两次切条之间的最小间隔
+  const SWITCH_RETRY_DELAY = 3000;   // 三次都失败后隔多久重新判定
+
+  // 找承载信息流的可滚动容器（抖音是 scroll-snap，滚一屏会吸附到下一条）
+  function scrollTarget(video) {
+    let node = video && video.parentElement;
+    while (node && node !== document.body) {
+      const cs = getComputedStyle(node);
+      if (/(auto|scroll)/.test(cs.overflowY) && node.scrollHeight > node.clientHeight + 50) return node;
+      node = node.parentElement;
     }
+    return null;
+  }
 
-    const genAt = D.gen;
-    const arrow = d === 0 ? document.querySelector(D.SEL.nextArrow) : null;
-
-    if (arrow && arrow.getBoundingClientRect().width > 0) {
-      arrow.click();
-    } else if (d <= 1) {
-      // 顺着可滚动容器滚一屏（抖音是 scroll-snap，会自动吸附到下一条）
-      let node = video.parentElement;
-      while (node && node !== document.body) {
-        const cs = getComputedStyle(node);
-        if (/(auto|scroll)/.test(cs.overflowY) && node.scrollHeight > node.clientHeight + 50) break;
-        node = node.parentElement;
+  function switchAttempt(video, i) {
+    // 1) 原生"下一条"箭头：和用户点一样走抖音自己的能力
+    if (i === 0) {
+      const arrow = document.querySelector(D.SEL.nextArrow);
+      if (arrow && arrow.getBoundingClientRect().width > 0) {
+        try { arrow.click(); } catch (e) { /* 忽略 */ }
+        return;
       }
-      if (node && node !== document.body) node.scrollBy({ top: node.clientHeight, behavior: 'auto' });
-      else return next(video, 2);
-    } else {
-      document.dispatchEvent(new KeyboardEvent('keydown', {
-        key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, which: 40, bubbles: true
-      }));
     }
+    // 2) 滚动容器滚一屏；第二次多滚 30%，防止 scroll-snap 又吸回原位
+    const node = scrollTarget(video);
+    if (node) {
+      try { node.scrollBy({ top: node.clientHeight * (i >= 1 ? 1.3 : 1.0), behavior: 'auto' }); } catch (e) { /* 忽略 */ }
+      return;
+    }
+    // 3) 找不到容器时兜底滚窗口
+    try { window.scrollBy({ top: window.innerHeight, behavior: 'auto' }); } catch (e) { /* 忽略 */ }
+  }
 
-    if (d >= 2) return;
-    // 1.4 秒后复核：代次没变 = 还是同一条视频，说明这一下没生效
+  // 三次都没切走：清掉 blocked，隔 4 秒重新判定一次（不再永久锁死）。
+  // 同一条视频连续失败 3 轮就停手，避免在"暂停 + 箭头点不动"的场景里每 4 秒反复点一次。
+  function giveUpSwitch(video, genAt) {
+    if (!video || !video.isConnected) return;
+    if (D.gen !== genAt) return;
+    st.skipFail = (st.skipFail || 0) + 1;
+    if (st.skipFail >= 3) {
+      st.blocked = false;
+      D.log('filter: 本条连续切条失败 ' + st.skipFail + ' 轮，先停手（换片后重试）');
+      return;
+    }
+    st.blocked = false;
+    st.passes = 0;
+    st.retryAt = Date.now() + SWITCH_RETRY_DELAY;
+    D.log('filter: 三次切条失败，' + SWITCH_RETRY_DELAY / 1000 + ' 秒后重试');
     setTimeout(() => {
       if (!video.isConnected || document.hidden) return;
-      if (D.gen !== genAt) return;        // 已经换片了，成功
-      st.blocked = false;                 // 允许下一轮重新判定并再试
-      next(video, d + 1);
-    }, 1400);
+      if (D.gen === genAt) judge(video);
+    }, SWITCH_RETRY_DELAY);
+  }
+
+  // 只有"强信号"命中的广告才允许在暂停状态下也直接跳：
+  // 购物卡片容器 / 官方广告标识 / 电商浮层 / 推广按钮 / 店铺账号，都是平台结构或固定文案，
+  // 不属于暂停层里"相关推荐"那种模棱两可的内容。
+  // 弱信号（靠价格 / 购买按钮 / 营销话术凑两条）在暂停时容易误判，仍然等恢复播放再判。
+  const STRONG_HIT_RE = /^(购物卡片|广告标识|电商浮层|推广浮层|推广按钮|店铺账号|手动屏蔽|ad)/;
+
+  function next(video, force) {
+    // 用户暂停了就别跳：暂停状态下切走视频，观感就是"暂停被取消并划到下一条"。
+    // force=true 表示命中的是强信号，允许在暂停状态直接切（否则广告会一直钉在暂停画面上）。
+    if (video && video.paused && !force) return;
+    // 选择器自检失败时不做破坏性动作，只保留纯视觉改动
+    if (D.safeMode === true) { D.log('filter: 安全模式，本次不跳视频'); return; }
+    const now = Date.now();
+    // 节流不能静默放弃：连续两条广告时，上一条刚跳完 1.2 秒内的这条会被直接丢掉，
+    // 而 blocked 已置真，于是"永远不再跳"。改成到点重试。
+    if (now - lastSkip < SWITCH_MIN_GAP) {
+      const wait = SWITCH_MIN_GAP - (now - lastSkip);
+      st.blocked = false;
+      D.log('filter: 切条节流，' + wait + 'ms 后重试');
+      setTimeout(() => {
+        if (video && video.isConnected && D.gen === st.gen) judge(video);
+      }, wait);
+      return;
+    }
+    lastSkip = now;
+
+    const genAt = D.gen;
+    const step = i => {
+      if (!video || !video.isConnected) return;
+      switchAttempt(video, i);
+      setTimeout(() => {
+        if (!video || !video.isConnected || document.hidden) return;
+        if (D.gen !== genAt) return;              // 代次变了 = 真的切走了
+        // 换片动画进行中代次可能还没更新，但旧视频已经滚出视口 → 也认为切走了，
+        // 否则会在动画中途再滚一屏，一次跳过两条。
+        if (D.visibleArea(video) < 10000) return;
+        if (i + 1 < SWITCH_TRIES) step(i + 1);
+        else giveUpSwitch(video, genAt);
+      }, SWITCH_RECHECK);
+    };
+    step(0);
+  }
+
+  // 把最近一次判定结果写到 DOM 上：不打开调试、不进隔离世界，也能从外部
+  // 一眼看到"当前这条被判成了什么"，排查误判/漏判时最省事（每次判定最多写一次）。
+  function publish(reason, cost) {
+    try {
+      document.documentElement.setAttribute('data-dyc-judge', JSON.stringify({
+        gen: D.gen,
+        reason: reason || null,
+        passes: st.passes,
+        blocked: st.blocked,
+        cost: cost == null ? null : cost,
+        ts: Date.now()
+      }));
+    } catch (e) { /* 忽略 */ }
   }
 
   function judge(video) {
     if (!(video instanceof HTMLVideoElement)) return;
     if (!enabled() && !liveEnabled()) return;
-    if (!document.documentElement.classList.contains('dyc-feed')) return;
+    if (!D.route.feed) return;
     if (!video.isConnected) return;
-    // 用户主动暂停时不判定、不跳下一条：暂停层常带"相关推荐 / 商品卡"，
-    // 很容易被当成带货；而且暂停状态下切走视频就是"暂停被莫名其妙取消"的观感。
-    if (video.paused) return;
+    // 暂停时不再直接放弃判定：暂停层里确实可能有"相关推荐 / 商品卡"，
+    // 所以暂停期间命中只登记待跳（pendingSkip），等恢复播放后再重判一次才跳。
+    // 旧版这里直接 return，命中过的那条广告恢复播放时也不会再跳（blocked 已锁死）。
     // 聊天页 / 私信抽屉 / 好友分享弹层里的播放器不参与广告判定：
     // 否则会把弹层里的「查看详情」当成商品卡，去点背后信息流的「下一条」箭头。
     if (D.isOverlayVideo(video)) return;
@@ -336,38 +496,98 @@
     if (D.isOverlayVideo(video)) return;
 
     // 换了视频就重置判定状态（用代次，不用 duration/src —— 它们经常是 Infinity/空串）
-    if (D.gen !== st.gen) st = { gen: D.gen, passes: 0, blocked: false, last: 0 };
+    if (D.gen !== st.gen) st = { gen: D.gen, passes: 0, blocked: false, last: 0, retryAt: 0, firstAt: 0, skipFail: 0 };
 
     const now = Date.now();
-    if (now - st.last < 500) return;    // 同一视频短时间内别重复扫
+    if (!st.firstAt) st.firstAt = now;
+    if (now < st.retryAt) return;       // 上一轮三次都没切走，等冷却结束再判
+    if (now - st.last < 350) return;    // 同一视频短时间内别重复扫
     st.last = now;
 
-    if (st.passes >= 5) return;         // 最多判 5 次：购物卡片有时比视频晚出现
+    // 判定窗口按"时间"而不是"次数"：loadedmetadata / playing / emptied / 2 秒看门狗
+    // 都会触发判定，按次数上限会在 2~3 秒内被耗光，导致播放中段才出现的推广浮层永远没机会被看到。
+    // 暂停态下没有媒体事件，只能靠看门狗每 6 秒补判，所以窗口放宽到 60 秒（画面不会变，扫描量可控）。
+    const win = video.paused ? 60000 : 12000;
+    const maxPasses = video.paused ? 20 : 12;
+    if (now - st.firstAt > win || st.passes >= maxPasses) return;
     st.passes++;
 
     // 广告和直播是两个独立开关，谁开着就查谁
+    const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
     let reason = enabled() ? detect(video) : '';
     if (!reason && liveEnabled()) reason = liveHit(video);
-    D.log('filter: 检查', reason || '未命中');
+    const cost = t0 ? Math.round(performance.now() - t0) : null;
+    D.log('filter: 检查', reason || '未命中', cost == null ? '' : cost + 'ms');
+    publish(reason, cost);
 
     if (!reason) {
       liveStreak = 0;                   // 回到正常视频，连续直播计数清零
-      if (st.passes < 5) setTimeout(() => judge(video), st.passes === 1 ? 900 : 1600);
+      liveCooldownUntil = 0;
+      // 前几次用短间隔（商品卡/浮层常比视频晚一拍），之后每 1.2 秒复核，
+      // 直到 12 秒窗口结束。旧的 0.9/3 秒节奏会让"广告已经出现一两秒才被判到"。
+      if (Date.now() - st.firstAt < 12000) setTimeout(() => judge(video), st.passes <= 3 ? 500 : 1200);
       return;
     }
 
-    if (!st.blocked) {
-      st.blocked = true;
-      D.log('filter: 识别到', reason, '，跳过该视频');
-      if (liveStreak >= MAX_LIVE_STREAK) {
-        liveStreak = 0;
-        D.log('filter: 连续直播过多，暂停本次过滤');
+    if (st.blocked) return;
+    st.blocked = true;
+    D.log('filter: 识别到', reason, '，跳过该视频');
+
+    // 连续直播过多时进入 20 秒冷却，期间既不跳也不重判；
+    // 旧版把 streak 归零后仍继续判下一条，表现为"每 5 条直播必漏 1 条"。
+    if (reason.indexOf('直播') !== -1) {
+      if (Date.now() < liveCooldownUntil) {
+        D.log('filter: 直播冷却中，暂不跳');
         return;
       }
-      if (reason.indexOf('直播') !== -1) liveStreak++;
-      else liveStreak = 0;
-      next(video);
+      liveStreak++;
+      if (liveStreak >= MAX_LIVE_STREAK) {
+        liveStreak = 0;
+        liveCooldownUntil = Date.now() + 20000;
+        D.log('filter: 连续直播过多，暂停 20 秒');
+        return;
+      }
+    } else {
+      liveStreak = 0;
+      liveCooldownUntil = 0;
     }
+
+    // 命中时视频可能正处于暂停（失焦自动暂停 / 用户手动暂停 / 抖音暂停层）。
+    // 强信号（购物卡、官方广告标、电商浮层、推广按钮、店铺账号）直接切，
+    // 否则广告会一直钉在暂停画面上；弱信号先登记，等恢复播放后重判再切。
+    const strong = STRONG_HIT_RE.test(reason);
+    if (video.paused && !strong) {
+      pendingSkip = { gen: D.gen, reason, at: Date.now(), video };
+      D.log('filter: 弱信号命中但视频暂停，登记待跳', reason);
+      return;
+    }
+    next(video, strong);
+  }
+
+  // 看门狗每 2 秒调用一次：视频恢复播放后补跳之前命中的广告（最多等 60 秒）。
+  function retryPending() {
+    if (!pendingSkip) return;
+    if (D.gen !== pendingSkip.gen || !pendingSkip.video || !pendingSkip.video.isConnected) {
+      pendingSkip = null;
+      return;
+    }
+    if (Date.now() - pendingSkip.at > 60000) {
+      D.log('filter: 待跳记录超时，放弃');
+      pendingSkip = null;
+      return;
+    }
+    const v = pendingSkip.video;
+    if (v.paused) return;
+    const p = pendingSkip;
+    pendingSkip = null;
+    // 暂停期间的判定可能被"暂停层里的推荐 / 商品卡"干扰，所以恢复播放后
+    // 重置判定窗口、重新判一次，确认还是广告才跳。
+    st.blocked = false;
+    st.passes = 0;
+    st.firstAt = Date.now();
+    st.last = 0;
+    D.log('filter: 视频恢复播放，重新判定', p.reason);
+    judge(v);
   }
 
   // ---------- 头像旁弹出的直播 / 推广小窗 ----------
@@ -429,7 +649,7 @@
 
   function closePopups(video) {
     if (!enabled()) return;
-    if (!document.documentElement.classList.contains('dyc-feed')) return;
+    if (!D.route.feed) return;
     const now = Date.now();
     if (now - lastClose < 800) return;                   // 关得太密容易误伤别的东西
 
@@ -484,7 +704,18 @@
     checkAd(video) {
       judge(video);
     },
+    // 手动标记后需要立刻把当前这条切走：重置判定窗口再判一次，
+    // 否则这条视频的 12 秒窗口可能已经用满，judge 会直接 return。
+    forceCheck(video) {
+      st.blocked = false;
+      st.passes = 0;
+      st.firstAt = Date.now();
+      st.last = 0;
+      st.retryAt = 0;
+      judge(video);
+    },
     closePopups,
+    retryPending,
     applySettings() {
       if (!enabled() && !liveEnabled()) {
         this.reset();
@@ -506,10 +737,12 @@
       };
     },
     reset() {
-      st = { gen: -1, passes: 0, blocked: false, last: 0 };
+      st = { gen: -1, passes: 0, blocked: false, last: 0, retryAt: 0, firstAt: 0, skipFail: 0 };
       lastSkip = 0;
       lastScan = 0;
       liveStreak = 0;
+      liveCooldownUntil = 0;
+      pendingSkip = null;
     }
   };
 })();

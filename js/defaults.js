@@ -9,6 +9,7 @@
     live: true,             // 推荐流中的直播间自动跳过
     pause: true,            // 失焦自动暂停
     overlay: true,          // 标题 / 互动栏自动隐藏
+    liveClean: true,        // 直播间精简（礼物栏 / 榜单 / 观众榜等）
     progress: true,         // 视频底部进度细线
     progressColor: '#fe2c55', // 进度细线颜色（6 位 hex）
     header: {
@@ -56,6 +57,7 @@
       live: r.live !== false,
       pause: r.pause !== false,
       overlay: r.overlay !== false,
+      liveClean: r.liveClean !== false,
       progress: r.progress !== false,
       progressColor,
       header: { mode: headerMode, keep: headerKeep },

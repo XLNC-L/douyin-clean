@@ -54,10 +54,11 @@ for (const p of refs) {
 }
 if (refs.size) pass('manifest 引用文件 ' + refs.size + ' 个');
 
-// popup.html 里的本地资源
+// popup.html 里的本地资源（只查会加载资源的标签；<a href> 是导航链接，不算资源）
 if (exists('popup.html')) {
   const html = read('popup.html');
-  const attrs = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map(m => m[1]);
+  const attrs = [...html.matchAll(/<(?:link|script|img|source)\b[^>]*?\b(?:src|href)="([^"]+)"/gi)]
+    .map(m => m[1]);
   for (const p of attrs) {
     if (/^https?:/i.test(p)) bad('popup.html 引用了远程资源：' + p);
     else if (!exists(p)) bad('popup.html 引用的文件不存在：' + p);

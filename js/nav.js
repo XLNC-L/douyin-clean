@@ -30,12 +30,14 @@
   // 「AI 抖音」入口：不跟导航模式走，任何模式下都强制隐藏。
   // clean() 已经压掉空格，所以 "AI 抖音" / "AI抖音" 都会归一成 "AI抖音"。
   const FORCE_ATTR = 'data-dyc-nav-force';
-  const FORCE_RE = /^ai抖音$/i;
+  // 前缀匹配：直播站的 aria-label 可能带后缀（如「AI抖音搜索」）
+  const FORCE_RE = /^ai抖音/i;
 
   let mo = null;
   let raf = 0;
   let retries = 0;
   let retryTimer = 0;
+  let lastNav = null;        // 上一次 apply 时的导航节点：页面重建侧边栏后要能自愈
 
   const navOf = () => document.querySelector(NAV_SEL);
 
@@ -63,6 +65,12 @@
     for (let i = 0; i < 5 && node && node !== nav; i++, node = node.parentElement) {
       const cls = typeof node.className === 'string' ? node.className : '';
       if (TAB_RE.test(cls)) return node;
+    }
+    // 兜底：直播站（live.douyin.com）的导航项没有 tab-* 类名，
+    // 退回"从链接向上找第一个只包含这一个链接的容器"，让逐项保留在那边也能工作。
+    node = el.parentElement;
+    for (let i = 0; i < 4 && node && node !== nav; i++, node = node.parentElement) {
+      if (node.querySelectorAll(LINK_SEL).length === 1) return node;
     }
     return null;
   }
@@ -107,6 +115,20 @@
 
   const isForced = label => FORCE_RE.test(String(label || ''));
 
+  // 保留项匹配放宽为"包含"：不同页面的侧边栏文案会变（我的 / 我的作品、直播 / 正在直播），
+  // 精确相等会导致"保留项一个都找不到"，进而触发旧的整条放弃逻辑 ——
+  // 表现就是切换侧边栏后导航全部又冒出来。
+  function keepMatch(label, keep) {
+    if (!label) return false;
+    for (const k of keep) {
+      if (!k) continue;
+      if (label === k) return true;
+      if (label.length >= 2 && label.indexOf(k) >= 0) return true;
+      if (k.length >= 2 && k.indexOf(label) >= 0) return true;
+    }
+    return false;
+  }
+
   // 优先隐藏整行（连行间距一起收掉）；结构变动、没有 tab-* 包裹时按文案兜底。
   function hideForced() {
     const nav = navOf();
@@ -131,6 +153,28 @@
     }
   }
 
+  // 文案直配兜底：不依赖 tab-* 与行容器推导，只按链接的可读文案决定隐藏。
+  // 用于直播站这类导航层级不同的页面；保留项命中时不会误伤（只隐藏没被保留的入口）。
+  function hideByText(nav, keep) {
+    let n = 0;
+    let hid = 0;
+    for (const a of nav.querySelectorAll(LINK_SEL)) {
+      if (++n > 60) break;
+      const label = labelOf(a);
+      if (!label) continue;
+      if (keepMatch(label, keep) || isForced(label)) continue;
+      let node = a;
+      let best = a;
+      for (let i = 0; i < 4 && node && node !== nav; i++, node = node.parentElement) {
+        if (node.querySelectorAll(LINK_SEL).length > 1) break;
+        best = node;
+      }
+      best.setAttribute(HIDE_ATTR, '');
+      hid++;
+    }
+    return hid;
+  }
+
   function hideItems() {
     const nav = navOf();
     if (!nav || D.settings.nav.mode !== 'custom' || fullHidden()) return;
@@ -138,22 +182,39 @@
     // AI 抖音这类强制隐藏项不允许被"保留"，否则会留下一条空行
     const keep = new Set((D.settings.nav.keep || []).filter(l => !isForced(l)));
     const list = rows();
-    if (!list.length) return;
 
-    // 保底：设置里勾选的入口一个都没找到时，不隐藏任何项，
-    // 避免因为抖音改版 / 页面还没渲染完而把整条导航清空。
-    if (keep.size && !list.some(it => keep.has(it.label))) {
+    // rows() 认不出结构时（直播站 live.douyin.com 的导航层级不同）退回"按文案直配"：
+    // 直接遍历链接，按可读文案判断保留/隐藏，不再依赖 tab-* 包裹层与行容器推导。
+    if (!list.length) {
+      if (!keep.size) { hideByText(nav, keep); return; }
+      const hit = hideByText(nav, keep);
+      if (hit) D.log('nav: 退回文案匹配隐藏', hit, '项');
+      return;
+    }
+
+    // 保底：设置里勾选的入口一个都没命中时，不能整条清空（不同页面侧边栏项不同），
+    // 但也不能像旧版那样直接放弃 —— 那正是"切换侧边栏后全部又出现"的原因。
+    // 现在改为保留第一项（通常是「精选」），隐藏其余。
+    if (keep.size && !list.some(it => keepMatch(it.label, keep))) {
       clearMarks();
-      D.log('nav: 保留项', Array.from(keep).join('/'), '不在当前导航里，本次不隐藏');
+      const first = list[0];
+      for (const it of list) {
+        if (it.row !== first.row) it.row.setAttribute(HIDE_ATTR, '');
+      }
+      D.log('nav: 保留项缺失，保底保留第一项并隐藏其余');
       return;
     }
 
     clearMarks();
 
+    // 侧栏底部是备案 / 协议页脚（京ICP 备xxxx号），跟导航板块无关：
+    // 逐项保留时一律收掉，不用等它被"非保留分支"的规则顺带隐藏。
+    nav.querySelectorAll('footer').forEach(el => el.setAttribute(HIDE_ATTR, ''));
+
     // 1) 未保留的入口行
     const keepRows = [];
     for (const it of list) {
-      if (keep.has(it.label)) keepRows.push(it.row);
+      if (keepMatch(it.label, keep)) keepRows.push(it.row);
       else it.row.setAttribute(HIDE_ATTR, '');
     }
     if (!keepRows.length) return;
@@ -205,12 +266,14 @@
   }
 
   function retryLater() {
-    if (retries >= 6 || retryTimer || fullHidden()) return;
+    // 直播站（live.douyin.com）首屏渲染比信息流慢，导航可能十几秒后才出现；
+    // 原来 6 次（6 秒）就放弃，导致"到了直播页精简失效"。放宽到 12 次。
+    if (retries >= 12 || retryTimer || fullHidden()) return;
     retries++;
     retryTimer = setTimeout(() => {
       retryTimer = 0;
       if (fullHidden()) return;
-      if (navOf()) apply();
+      if (navOf()) D.nav.apply();
       else retryLater();
     }, 1000);
   }
@@ -218,6 +281,7 @@
   D.nav = {
     apply() {
       const nav = navOf();
+      lastNav = nav;
       // 导航精简是全站生效的（我的 / 收藏 / 搜索 / 详情页都保持一致），
       // 不再要求 html.dyc-feed —— 只在刷视频页面生效会表现为"换个页面侧栏又出来了"。
       const hidden = fullHidden();
@@ -235,10 +299,37 @@
       D.log('nav: 模式=' + D.settings.nav.mode,
         '保留=' + ((D.settings.nav.keep || []).join('/') || '无'),
         'AI抖音=强制隐藏');
+
+      // 调试探针：外部（CDP / 控制台）不用进隔离世界也能看到 nav 的实际执行情况，
+      // 定位"直播站精简失效"这类问题时最省事。
+      try {
+        document.documentElement.setAttribute('data-dyc-nav-state', JSON.stringify({
+          nav: !!nav,
+          mode: D.settings.nav.mode,
+          keep: (D.settings.nav.keep || []).length,
+          rows: (function () { try { return rows().length; } catch (e) { return 'err'; } })(),
+          hides: document.querySelectorAll('[data-dyc-nav-hide]').length,
+          forced: document.querySelectorAll('[data-dyc-nav-force]').length,
+          ts: Date.now()
+        }));
+      } catch (e) { /* 忽略 */ }
     },
 
     labels() {
       return rows().map(it => it.label).filter(l => !isForced(l));
+    },
+
+    // 页面重建侧边栏（切换侧边导航、SPA 重渲染）后，旧的 MutationObserver 会失效、
+    // 标记也会随节点替换一起消失，表现为"换个侧边栏就又全部出现"。
+    // main.js 的 2 秒看门狗会调这里：节点变了或标记没了就重新 apply 一次。
+    verify() {
+      if (D.settings && fullHidden()) return;
+      const nav = navOf();
+      if (!nav) return;
+      if (nav !== lastNav) { this.apply(); return; }
+      if (D.settings && D.settings.nav.mode === 'custom') {
+        if (!document.querySelectorAll('[' + HIDE_ATTR + ']').length) this.apply();
+      }
     },
 
     reset() {
@@ -246,6 +337,7 @@
       clearTimeout(retryTimer);
       retryTimer = 0;
       retries = 0;
+      lastNav = null;
       clearMarks();
       clearForced();
       document.documentElement.classList.remove('dyc-nav-hidden');

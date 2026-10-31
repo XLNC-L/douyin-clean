@@ -14,6 +14,7 @@
 
   const HIDE_ATTR = 'data-dyc-hide';
   const hidden = [];
+  let lastCluster = null;
 
   function modeOf() {
     const h = D.settings && D.settings.header;
@@ -49,6 +50,19 @@
     return /%|px/.test(radius) && parseFloat(radius) >= 12;
   }
 
+  // 保留项包含匹配：不同页面的顶栏图标文案会变（通知 / 通知3 / 消息1），
+  // 精确相等会让"保留项一个都没找到"，进而触发整块不隐藏 —— 表现为换个页面顶栏全冒出来。
+  function keepMatch(label, keep) {
+    if (!label) return false;
+    for (const k of keep) {
+      if (!k) continue;
+      if (label === k) return true;
+      if (label.length >= 2 && label.indexOf(k) >= 0) return true;
+      if (k.length >= 2 && k.indexOf(label) >= 0) return true;
+    }
+    return false;
+  }
+
   // 顶栏右侧的图标组容器。
   // ① 优先按语义标记定位：顶栏的「通知 / 消息」入口一定在图标组里，
   //    比"找一个圆形头像"可靠得多 —— 未登录时根本没有头像，旧逻辑会直接放弃。
@@ -59,13 +73,14 @@
       if (!anchor) continue;
       let best = null;
       let node = anchor.parentElement;
-      for (let i = 0; i < 6 && node && node !== document.body; i++, node = node.parentElement) {
+      // 不再遇 0 尺寸就 break：抖音用 PACE-ISLAND 微前端，图标组外面常夹一层 0×0 的
+      // 宿主节点（直播站 / 搜索结果页），一 break 就找不到图标组，顶栏精简整块失效。
+      for (let i = 0; i < 8 && node && node !== document.body; i++, node = node.parentElement) {
         const r = node.getBoundingClientRect();
-        if (!(r.height > 0 && r.height < 80 && r.top < 96)) break;
-        if (r.width > 0 && r.width < 460) best = node;
-        else break;
+        if (!(r.height > 0 && r.height < 80 && r.top < 96)) continue;
+        if (r.width > 60 && r.width < 460) best = node;
       }
-      if (best && best.children.length >= 3) return best;
+      if (best && best.children.length >= 2) return best;
     }
 
     const vw = window.innerWidth;
@@ -145,11 +160,19 @@
     const keep = new Set((D.settings.header && D.settings.header.keep) || []);
     const list = itemsOf(kids);
 
-    // 保底：勾选的项一个都没在顶栏里找到（抖音改版 / 还没渲染完）时不动手，
-    // 避免把通知、消息等入口一次性全隐藏掉。一个都没勾选时才是"只留头像"。
-    if (keep.size && !list.some(it => keep.has(it.label))) {
-      D.log('header: 保留项', Array.from(keep).join('/'), '不在当前顶栏里，本次不隐藏');
-      return 0;
+    // 保底：勾选项一个都没命中（不同页面顶栏图标不同）时不再整块放弃，
+    // 改为保留第一项、隐藏其余，避免"切个页面顶栏图标全回来"。
+    if (keep.size && !list.some(it => keepMatch(it.label, keep))) {
+      const first = list[0];
+      kids.forEach(k => {
+        const r = k.getBoundingClientRect();
+        if (r.width > 110 || r.height > 72) return;
+        if (isAvatar(k)) return;
+        if (first && k === first.el) return;
+        markHidden(k);
+      });
+      D.log('header: 保留项缺失，保底保留第一项');
+      return kids.length - hidden.length;
     }
 
     let kept = 0;
@@ -159,7 +182,7 @@
       if (isAvatar(k)) { kept++; return; }
 
       const l = labelOf(k);
-      if (l && keep.has(l)) { kept++; return; }
+      if (l && keepMatch(l, keep)) { kept++; return; }
       markHidden(k);
     });
     return kept;
@@ -173,12 +196,14 @@
 
       const cluster = findCluster();
       if (!cluster) return false;
+      lastCluster = cluster;
 
       const kids = Array.from(cluster.children).filter(k => {
         const r = k.getBoundingClientRect();
         return r.width > 0 && r.height > 0;
       });
-      if (kids.length < 3 || kids.length > 18) return false;
+      // 直播站 / 搜索页的图标组可能只有两个子项（通知 + 头像），放宽到 2
+      if (kids.length < 2 || kids.length > 18) return false;
 
       const kept = modeOf() === 'custom' ? applyCustom(kids) : applySimple(kids);
       D.log('header: 模式=' + modeOf(), '保留入口', kept, '个，隐藏', hidden.length, '个');
@@ -209,6 +234,16 @@
         return;
       }
       this.apply();
+    },
+
+    // 顶栏图标组同样会被页面重建（切页面 / SPA 重渲染），旧的一次性扫描会失效。
+    // main.js 的 2 秒看门狗调用这里：节点变了或标记没了就重新 apply。
+    verify() {
+      if (modeOf() === 'off') return;
+      const cluster = findCluster();
+      if (!cluster) return;
+      if (cluster !== lastCluster) { this.apply(); return; }
+      if (!hidden.length) this.apply();
     },
 
     reset,

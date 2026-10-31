@@ -14,7 +14,6 @@
 
   let settings = normalize(DEFAULTS);
   let navItems = [];
-  let headerItems = [];
   let connected = false;
   let toastTimer = 0;
 
@@ -37,13 +36,9 @@
     $$('input[name="navMode"]').forEach(el => {
       el.checked = el.value === settings.nav.mode;
     });
-    $$('input[name="headerMode"]').forEach(el => {
-      el.checked = el.value === settings.header.mode;
-    });
     $('#progressStyle').hidden = !settings.progress;
     renderColor();
     $('#navCustom').hidden = settings.nav.mode !== 'custom';
-    $('#headerCustom').hidden = settings.header.mode !== 'custom';
     renderNav();
     renderHeader();
   }
@@ -91,43 +86,12 @@
       chip.append(cb, text);
       list.append(chip);
     }
-    hint.textContent = '未勾选的入口会被隐藏，改动即时生效；一个都不勾选时整条导航隐藏。「AI 抖音」入口始终隐藏。';
+    hint.textContent = '未勾选的入口会被隐藏，改动即时生效；一个都不勾选时整条导航隐藏。侧栏底部的备案 / 协议信息（如京ICP）默认隐藏，「AI 抖音」入口始终隐藏。';
   }
 
   function renderHeader() {
-    const list = $('#headerList');
-    const hint = $('#headerHint');
-    list.textContent = '';
-
-    if (!headerItems.length) {
-      hint.textContent = connected
-        ? '当前页面没有识别到可自定义的顶栏图标；打开抖音视频页并刷新后再试。'
-        : '打开抖音网页版并刷新后，这里会列出可保留的顶栏图标。';
-      return;
-    }
-
-    for (const label of headerItems) {
-      const chip = document.createElement('label');
-      chip.className = 'chip';
-
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.checked = settings.header.keep.indexOf(label) !== -1;
-      cb.addEventListener('change', () => {
-        const keep = new Set(settings.header.keep);
-        if (cb.checked) keep.add(label);
-        else keep.delete(label);
-        settings.header.keep = Array.from(keep);
-        save();
-      });
-
-      const text = document.createElement('span');
-      text.textContent = label;
-
-      chip.append(cb, text);
-      list.append(chip);
-    }
-    hint.textContent = '未勾选的图标会被隐藏，改动即时生效；一个都不勾选时只保留头像。';
+    const sw = $('#headerSimple');
+    if (sw) sw.checked = settings.header.mode !== 'off';
   }
 
   // 立即写 storage：面板随时可能被点外面关掉，延迟保存会丢改动
@@ -143,6 +107,23 @@
       });
     } catch (e) {
       toast('保存失败，请重新打开扩展');
+    }
+  }
+
+  // 手动屏蔽规则库（存 local，不占 sync 配额）
+  const RULE_KEY = 'dycBlockRules';
+
+  async function refreshRules() {
+    const el = $('#ruleDesc');
+    if (!el) return;
+    try {
+      const res = await chrome.storage.local.get(RULE_KEY);
+      const r = res && res[RULE_KEY];
+      const t = r && Array.isArray(r.topics) ? r.topics.length : 0;
+      const a = r && Array.isArray(r.authors) ? r.authors.length : 0;
+      el.textContent = (t || a) ? (t + ' 个话题 / ' + a + ' 个作者') : '暂无（刷视频时按 Alt+Shift+X 添加）';
+    } catch (e) {
+      el.textContent = '读取失败';
     }
   }
 
@@ -185,14 +166,18 @@
       });
     });
 
-    $$('input[name="headerMode"]').forEach(el => {
-      el.addEventListener('change', () => {
-        if (!el.checked) return;
-        settings.header.mode = el.value;
-        render();
-        save();
-      });
+    $('#headerSimple').addEventListener('change', () => {
+      settings.header.mode = $('#headerSimple').checked ? 'simple' : 'off';
+      save();
     });
+
+    const repo = $('#repoLink');
+    if (repo) {
+      repo.addEventListener('click', e => {
+        e.preventDefault();
+        chrome.tabs.create({ url: repo.href });
+      });
+    }
 
     $('#onlyMine').addEventListener('click', () => {
       settings.nav.mode = 'custom';
@@ -208,6 +193,19 @@
       save();
       toast('已恢复默认');
     });
+
+    const clearBtn = $('#clearRules');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', async () => {
+        try {
+          await chrome.storage.local.set({ [RULE_KEY]: { topics: [], authors: [] } });
+          await refreshRules();
+          toast('已清空屏蔽规则');
+        } catch (e) {
+          toast('清空失败，请重新打开扩展');
+        }
+      });
+    }
   }
 
   async function readStored() {
@@ -229,12 +227,13 @@
       const state = await chrome.tabs.sendMessage(tab.id, { type: 'dyc:get-state' });
       connected = true;
       navItems = (state && Array.isArray(state.navItems)) ? state.navItems.slice(0, 30) : [];
-      headerItems = (state && Array.isArray(state.headerItems)) ? state.headerItems.slice(0, 20) : [];
       $('#ver').textContent = 'v' + (state && state.version ? state.version : chrome.runtime.getManifest().version);
+      document.body.dataset.conn = 'on';
       setStatus('已连接当前抖音页面');
       render();
     } catch (e) {
       connected = false;
+      document.body.dataset.conn = 'off';
       setStatus('当前标签页未连接，请在抖音页面刷新后重试');
       render();
     }
@@ -245,6 +244,7 @@
     $('#ver').textContent = 'v' + chrome.runtime.getManifest().version;
     render();
     bind();
+    await refreshRules();
     await readPage();
   })();
 })();

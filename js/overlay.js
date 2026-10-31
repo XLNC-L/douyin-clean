@@ -423,7 +423,7 @@
     const e = pending;
     pending = null;
     if (!enabled()) return;
-    if (!e || !html.classList.contains('dyc-feed')) return;
+    if (!e || !D.route.player) return;
 
     // 画面矩形按需刷新：最多每 250ms 读一次布局，既不会用到换视频/开评论后的旧尺寸，
     // 也不会给每帧增加布局开销。
@@ -470,7 +470,7 @@
   }
 
   document.addEventListener('pointermove', e => {
-    if (!html.classList.contains('dyc-feed')) return;
+    if (!D.route.player) return;
     pending = e;
     if (raf) return;
     raf = requestAnimationFrame(onMove);
@@ -478,7 +478,7 @@
 
   // 滚轮不会触发 pointermove；指针停在画面上滑动滚轮时也让浮层显示
   document.addEventListener('wheel', e => {
-    if (!html.classList.contains('dyc-feed')) return;
+    if (!D.route.player) return;
     pending = e;
     if (raf) return;
     raf = requestAnimationFrame(onMove);
@@ -488,13 +488,13 @@
   // 只认当前在播的那条视频，预加载的相邻视频暂停不会影响当前画面。
   // 暂停瞬间立即收起一次；之后鼠标移动照常显示，静止 2 秒照常收起。
   document.addEventListener('pause', e => {
-    if (!(e.target instanceof HTMLVideoElement) || !html.classList.contains('dyc-feed')) return;
+    if (!(e.target instanceof HTMLVideoElement) || !D.route.player) return;
     const v = currentVideo || D.playingVideo();
     if (e.target !== v) return;
     hide();
   }, true);
   document.addEventListener('play', e => {
-    if (!(e.target instanceof HTMLVideoElement) || !html.classList.contains('dyc-feed')) return;
+    if (!(e.target instanceof HTMLVideoElement) || !D.route.player) return;
     const v = currentVideo || D.playingVideo();
     if (e.target !== v) return;
     // 鼠标还停在画面上时，恢复播放也把浮层带回来
@@ -504,7 +504,7 @@
   // 视口变化时刷新缓存矩形（只做一次，不循环）
   window.addEventListener('resize', () => {
     currentRect = null;
-    if (html.classList.contains('dyc-feed')) sync();
+    if (D.route.player) sync();
   }, { passive: true });
 
   D.overlay = {
@@ -512,7 +512,7 @@
     // 周期性补标（main.js 的 2 秒看门狗调用）：游戏卡片 / 推荐卡片经常比视频晚一步渲染，
     // 只在换片时标一次会漏。这里只扫左下角两类小卡片，每个视频最多补 6 次（约 12 秒）。
     tick() {
-      if (!enabled() || !html.classList.contains('dyc-feed')) return;
+      if (!enabled() || !D.route.player) return;
       if (gameDone && recDone) return;
       if (tickLeft <= 0) return;
       const v = activeVideo() || currentVideo || D.playingVideo();
@@ -524,7 +524,7 @@
       if (!recDone) recDone = markRecommend(v, vr) > 0;
     },
     applySettings() {
-      if (!html.classList.contains('dyc-feed')) {
+      if (!D.route.player) {
         clearMarks();
         clearPermanent();
         return;
