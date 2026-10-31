@@ -76,7 +76,7 @@
   // 一帧的开销是两次属性读取，远小于一次样式计算。
   function loop() {
     rafId = 0;
-    if (!enabled() || !html.classList.contains('dyc-feed')) return;
+    if (!enabled() || !D.route.player) return;
     retarget();                        // 每 120ms 确认一次"线条该挂在哪条视频上"
     if (bar && video) {
       alignBar();                      // 每 400ms 对齐一次视频实际画面
@@ -437,7 +437,7 @@
   }
 
   function attach(v) {
-    if (!enabled() || !html.classList.contains('dyc-feed')) {
+    if (!enabled() || !D.route.player) {
       detach();
       return;
     }
@@ -462,7 +462,7 @@
       const v = e.target;
       if (!(v instanceof HTMLVideoElement)) return;
       if (LOG_TYPES[type]) logEvent(type, v);
-      if (!enabled() || !html.classList.contains('dyc-feed')) return;
+      if (!enabled() || !D.route.player) return;
       // 聊天页 / 私信抽屉 / 好友分享弹层里的播放器不挂进度线
       if (D.isOverlayVideo(v)) return;
 
@@ -593,7 +593,7 @@
     // 幂等补挂：只在"视频/宿主/节点"真的变了或被播放器清掉时才重建。
     // 给 main.js 的 2 秒看门狗和 overlay 的显示切换用，暂停时也能把线条补回来。
     sync(v) {
-      if (!enabled() || !html.classList.contains('dyc-feed')) return;
+      if (!enabled() || !D.route.player) return;
       if (v && D.isOverlayVideo(v)) return;
       // 先补开关类和颜色，防止设置回调/重渲染把样式丢了却被下面的幂等判断直接放行
       ensureStyle();
@@ -611,7 +611,7 @@
     },
     applySettings() {
       paintColor();
-      const on = enabled() && html.classList.contains('dyc-feed');
+      const on = enabled() && D.route.player;
       html.classList.toggle(ON_CLASS, on);
       if (!on) {
         detach();

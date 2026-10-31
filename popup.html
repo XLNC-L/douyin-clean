@@ -7,17 +7,30 @@
   <link rel="stylesheet" href="css/popup.css">
 </head>
 <body>
-  <header class="head">
-    <img class="logo" src="icons/icon48.png" alt="">
-    <div class="head-text">
-      <div class="title">抖音净播 <span id="ver" class="ver"></span></div>
-      <div id="status" class="status">正在读取当前页面…</div>
+  <header class="top">
+    <div class="top-row">
+      <div class="brand">
+        <img class="logo" src="icons/icon48.png" alt="">
+        <div class="brand-text">
+          <span class="name">抖音净播</span>
+          <span id="ver" class="ver"></span>
+        </div>
+      </div>
+      <a id="repoLink" class="icon-btn" href="https://github.com/XLNC-L/douyin-clean" target="_blank" rel="noopener" title="GitHub 仓库" aria-label="打开 GitHub 仓库">
+        <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+      </a>
+    </div>
+    <div class="status">
+      <i class="dot"></i>
+      <span id="status">正在读取当前页面…</span>
     </div>
   </header>
 
-  <main>
+  <main class="stack">
     <section class="card">
-      <h2>功能</h2>
+      <h2>播放</h2>
       <label class="row">
         <span class="row-main">
           <span class="row-title">自动最高清晰度</span>
@@ -25,6 +38,43 @@
         </span>
         <input class="switch" type="checkbox" data-key="quality">
       </label>
+      <label class="row">
+        <span class="row-main">
+          <span class="row-title">失焦自动暂停</span>
+          <span class="row-desc">切到后台时暂停，回到页面不自动续播</span>
+        </span>
+        <input class="switch" type="checkbox" data-key="pause">
+      </label>
+      <label class="row">
+        <span class="row-main">
+          <span class="row-title">底部进度细线</span>
+          <span class="row-desc">视频底边常驻一条细线，直播不显示</span>
+        </span>
+        <input class="switch" type="checkbox" data-key="progress">
+      </label>
+      <div id="progressStyle" class="fold" hidden>
+        <div class="fold-head">
+          <span>线条颜色</span>
+          <span id="progressHex" class="hex">#FE2C55</span>
+        </div>
+        <div class="color-line">
+          <label class="color-pick" title="自定义颜色">
+            <input id="progressColor" class="color-input" type="color" value="#fe2c55" aria-label="自定义进度条颜色">
+          </label>
+          <div id="colorPresets" class="presets">
+            <button class="swatch" type="button" data-color="#fe2c55" style="--sw:#fe2c55" title="抖音红" aria-label="抖音红"></button>
+            <button class="swatch" type="button" data-color="#25f4ee" style="--sw:#25f4ee" title="青色" aria-label="青色"></button>
+            <button class="swatch" type="button" data-color="#00e676" style="--sw:#00e676" title="绿色" aria-label="绿色"></button>
+            <button class="swatch" type="button" data-color="#ffd400" style="--sw:#ffd400" title="黄色" aria-label="黄色"></button>
+            <button class="swatch" type="button" data-color="#a855f7" style="--sw:#a855f7" title="紫色" aria-label="紫色"></button>
+            <button class="swatch" type="button" data-color="#ffffff" style="--sw:#ffffff" title="白色" aria-label="白色"></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>过滤</h2>
       <label class="row">
         <span class="row-main">
           <span class="row-title">广告 / 带货过滤</span>
@@ -35,59 +85,40 @@
       <label class="row">
         <span class="row-main">
           <span class="row-title">直播过滤</span>
-          <span class="row-desc">推荐流里的直播间自动切到下一条，可关闭</span>
+          <span class="row-desc">推荐流里的直播间自动切到下一条</span>
         </span>
         <input class="switch" type="checkbox" data-key="live">
       </label>
+    </section>
+
+    <section class="card">
+      <h2>界面</h2>
       <label class="row">
         <span class="row-main">
-          <span class="row-title">失焦自动暂停</span>
-          <span class="row-desc">切到后台时暂停，回到页面不会自动恢复</span>
+          <span class="row-title">浮层自动隐藏</span>
+          <span class="row-desc">标题与互动栏静止 2 秒后淡出</span>
         </span>
-        <input class="switch" type="checkbox" data-key="pause">
+        <input class="switch" type="checkbox" data-key="overlay">
+      </label>
+      <label class="row">
+        <span class="row-main">
+          <span class="row-title">直播间精简</span>
+          <span class="row-desc">隐藏礼物栏与榜单入口，保留聊天与画面</span>
+        </span>
+        <input class="switch" type="checkbox" data-key="liveClean">
       </label>
     </section>
 
     <section class="card">
-      <h2>播放进度条</h2>
-      <label class="row">
-        <span class="row-main">
-          <span class="row-title">底部进度细线</span>
-          <span class="row-desc">视频底边常驻一条细线，显示播放进度；直播不显示</span>
-        </span>
-        <input class="switch" type="checkbox" data-key="progress">
-      </label>
-      <div id="progressStyle" class="nav-custom" hidden>
-        <div class="nav-head">
-          <span>线条颜色</span>
-          <span id="progressHex" class="hex">#FE2C55</span>
-        </div>
-        <div class="color-line">
-          <input id="progressColor" class="color-input" type="color" value="#fe2c55" aria-label="进度条颜色">
-          <div id="colorPresets" class="presets">
-            <button class="swatch" type="button" data-color="#fe2c55" style="--sw:#fe2c55" title="抖音红" aria-label="抖音红"></button>
-            <button class="swatch" type="button" data-color="#25f4ee" style="--sw:#25f4ee" title="青色" aria-label="青色"></button>
-            <button class="swatch" type="button" data-color="#00e676" style="--sw:#00e676" title="绿色" aria-label="绿色"></button>
-            <button class="swatch" type="button" data-color="#ffd400" style="--sw:#ffd400" title="黄色" aria-label="黄色"></button>
-            <button class="swatch" type="button" data-color="#a855f7" style="--sw:#a855f7" title="紫色" aria-label="紫色"></button>
-            <button class="swatch" type="button" data-color="#ffffff" style="--sw:#ffffff" title="白色" aria-label="白色"></button>
-          </div>
-        </div>
-        <p class="hint">改动即时生效；也可以点左侧色块用取色器选任意颜色。</p>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>布局精简 · 左侧导航</h2>
+      <h2>左侧导航</h2>
       <div class="seg" role="radiogroup" aria-label="左侧导航模式">
         <label><input type="radio" name="navMode" value="hide"><span>整条隐藏</span></label>
         <label><input type="radio" name="navMode" value="custom"><span>自定义保留</span></label>
         <label><input type="radio" name="navMode" value="off"><span>保持原样</span></label>
       </div>
-
-      <div id="navCustom" class="nav-custom" hidden>
-        <div class="nav-head">
-          <span>勾选要保留的入口，其余隐藏</span>
+      <div id="navCustom" class="fold" hidden>
+        <div class="fold-head">
+          <span>勾选要保留的板块，其余隐藏</span>
           <button id="onlyMine" class="link-btn" type="button">仅保留「我的」</button>
         </div>
         <div id="navList" class="nav-list"></div>
@@ -96,36 +127,32 @@
     </section>
 
     <section class="card">
-      <h2>布局精简 · 顶栏</h2>
-      <div class="seg" role="radiogroup" aria-label="顶栏模式">
-        <label><input type="radio" name="headerMode" value="simple"><span>默认精简</span></label>
-        <label><input type="radio" name="headerMode" value="custom"><span>自定义保留</span></label>
-        <label><input type="radio" name="headerMode" value="off"><span>保持原样</span></label>
-      </div>
-
-      <div id="headerCustom" class="nav-custom" hidden>
-        <div class="nav-head">
-          <span>勾选要保留的图标，其余隐藏（头像始终保留）</span>
-        </div>
-        <div id="headerList" class="nav-list"></div>
-        <p id="headerHint" class="hint"></p>
-      </div>
+      <h2>顶栏</h2>
+      <label class="row">
+        <span class="row-main">
+          <span class="row-title">顶栏精简</span>
+          <span class="row-desc">只留通知、消息与头像，其余图标隐藏</span>
+        </span>
+        <input id="headerSimple" class="switch" type="checkbox">
+      </label>
     </section>
 
     <section class="card">
-      <h2>布局精简 · 其他</h2>
-      <label class="row">
+      <h2>手动屏蔽</h2>
+      <div class="row row-static">
         <span class="row-main">
-          <span class="row-title">浮层自动隐藏</span>
-          <span class="row-desc">标题与互动栏静止 2 秒后淡出</span>
+          <span class="row-title">屏蔽规则</span>
+          <span class="row-desc" id="ruleDesc">读取中…</span>
         </span>
-        <input class="switch" type="checkbox" data-key="overlay">
-      </label>
+        <button id="clearRules" class="link-btn" type="button">清空</button>
+      </div>
+      <p class="hint">刷视频时按 Alt + Shift + X 屏蔽当前视频的话题 / 作者，之后同类视频自动跳过；再按一次取消。</p>
     </section>
   </main>
 
   <footer class="foot">
     <button id="reset" class="ghost" type="button">恢复默认</button>
+    <span class="foot-note">改动即时生效，无需刷新</span>
   </footer>
 
   <div id="toast" class="toast" hidden>已保存</div>

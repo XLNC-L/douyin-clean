@@ -238,7 +238,7 @@
     // 早退时必须把排队标记清掉，否则这条视频再也排不上队
     if (!enabled() || running || got4K || id !== job) { queuedGen = -1; return; }
     if (gen0 !== qGen) { queuedGen = -1; return; }          // 视频已经换了，这一轮作废
-    if (!document.documentElement.classList.contains('dyc-feed')) { queuedGen = -1; return; }
+    if (!D.route.player) { queuedGen = -1; return; }
 
     const v = (curVideo instanceof HTMLVideoElement) ? curVideo : D.playingVideo();
     // 刚换视频时清晰度组件可能还停留在上一条的状态，等元数据就绪再看。
@@ -442,7 +442,7 @@
       }, wait);
     },
     applySettings() {
-      if (!enabled() || !document.documentElement.classList.contains('dyc-feed')) {
+      if (!enabled() || !D.route.player) {
         this.reset();
         return;
       }

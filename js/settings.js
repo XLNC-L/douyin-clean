@@ -41,6 +41,7 @@
     if (D.progress) D.progress.applySettings();
     if (D.quality) D.quality.applySettings();
     if (D.filter) D.filter.applySettings();
+    if (D.live) D.live.apply();
   }
   D.applySettings = apply;
 

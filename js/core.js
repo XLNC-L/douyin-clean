@@ -15,7 +15,7 @@
   'use strict';
 
   const D = (window.__DYC = {
-    VER: '1.9.16',
+    VER: '2.0.0',
     debug: false,
 
     // 视频代次：每换一条视频 +1。
@@ -52,12 +52,46 @@
     }
   });
 
-  // 只在"刷视频"的页面激活；其他页面扩展完全静默
-  D.isShell = () => {
-    const p = location.pathname;
-    return p === '/' ||
-      /^\/(jingxuan|video|discover|channel|hot|recommend|following|friend)(\/|$)/.test(p);
+  // ---------- 路由能力矩阵 ----------
+  // 旧版只有一个 isShell 布尔：非信息流页面全部静默，而视频详情页又被当成信息流
+  // （会去点"下一条"箭头，但详情页根本没有这个结构）。
+  // 现在按"这个页面能做什么"声明能力，模块只依赖能力，不再各自判断某个 class：
+  //   feed   - 竖向信息流，可以切下一条（广告过滤 / 切条）
+  //   player - 有播放器，可以做清晰度 / 进度线 / 浮层显隐（详情页、影院、短剧、合集）
+  // 左侧导航与顶栏精简本来就是全站生效，不需要额外能力。
+  const FEED_ROOTS = new Set(['jingxuan', 'recommend', 'following', 'friend', 'discover', 'hot', 'channel']);
+  const PLAYER_ROOTS = new Set([
+    'video', 'theater', 'cinema', 'movie', 'film',
+    'series', 'drama', 'playlet', 'shortplay',
+    'collection', 'mix',
+    // 放映厅（/vs）与 AI 搜索页也可能带播放器
+    'vs', 'aisearch',
+    // 搜索结果 / 用户主页也有播放器（卡片里点开就播），浮层与进度线同样需要工作
+    'search', 'user'
+  ]);
+
+  D.routeOf = (path, host) => {
+    const p = path || '/';
+    const h = String(host || (typeof location !== 'undefined' ? location.hostname : ''));
+    // 直播站是独立域名（live.douyin.com），结构完全不同：没有信息流卡片，不能切条
+    if (h.indexOf('live.douyin.com') >= 0) return { page: 'live', feed: false, player: true };
+    // 推荐页顶部的搜索框打开的是 /root/search/<关键词>（不是 /search/<关键词>），
+    // 真正的页面类型在 root 之后的第二段；只取第一段会把整页认成 other，
+    // 于是浮层显隐与进度线全都不工作。
+    const segs = p.split('/').filter(Boolean).map(s => s.toLowerCase());
+    const seg = (segs[0] === 'root' && segs[1]) ? segs[1] : (segs[0] || '');
+    if (p === '/' || FEED_ROOTS.has(seg)) return { page: 'feed', feed: true, player: true };
+    if (PLAYER_ROOTS.has(seg)) return { page: seg, feed: false, player: true };
+    return { page: 'other', feed: false, player: false };
   };
+
+  D.route = D.routeOf(
+    typeof location !== 'undefined' ? location.pathname : '/',
+    typeof location !== 'undefined' ? location.hostname : ''
+  );
+
+  // 兼容旧调用：isShell 等价于"是信息流页面"
+  D.isShell = () => D.route.feed;
 
   D.log = (...args) => {
     if (D.debug) console.log('%c[抖音净播]', 'color:#25f4ee;font-weight:bold', ...args);
@@ -83,19 +117,28 @@
 
   D.sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-  // 当前正在播放的视频元素：取"在播 + 面积最大"的那个，兼容任何页面布局
+  // 当前正在播放的视频元素：取"在播 + 可见面积最大"的那个，兼容任何页面布局。
+  // 关键：必须按"与视口的交集面积"排序，不能按 rect 的宽高。
+  // 抖音会把相邻视频预加载在 DOM 里，它们与当前视频尺寸完全一样（rect 面积相同），
+  // 按 rect 面积排序时 `sort` 会选中先出现的那条 —— 常常是滚出屏幕的预加载视频，
+  // 于是过滤 / 清晰度 / 进度条 / 浮层全部作用在错误的对象上，表现为"时好时坏"。
   D.playingVideo = () => {
     const all = Array.from(document.querySelectorAll('video'));
     if (!all.length) return null;
-    const area = v => {
-      const r = v.getBoundingClientRect();
-      return (r.width * r.height) || 0;
-    };
     const playing = all.filter(v => !v.paused && v.readyState >= 2);
-    const pool = playing.length ? playing : all.filter(v => area(v) > 40000);
+    const pool = playing.length ? playing : all.filter(v => D.visibleArea(v) > 40000);
     if (!pool.length) return null;
-    pool.sort((a, b) => area(b) - area(a));
-    return pool[0];
+    pool.sort((a, b) => D.visibleArea(b) - D.visibleArea(a));
+    const best = pool[0];
+    // 在播的候选全部在屏幕外时（切标签 / 预加载），退回"所有可见视频里最大的那条"
+    if (D.visibleArea(best) < 10000) {
+      const visible = all.filter(v => D.visibleArea(v) > 40000);
+      if (visible.length) {
+        visible.sort((a, b) => D.visibleArea(b) - D.visibleArea(a));
+        return visible[0];
+      }
+    }
+    return best;
   };
 
   D.textOf = el => (el && el.textContent ? el.textContent.replace(/\s+/g, '').trim() : '');
