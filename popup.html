@@ -103,10 +103,23 @@
       <label class="row">
         <span class="row-main">
           <span class="row-title">直播间精简</span>
-          <span class="row-desc">隐藏礼物栏与榜单入口，保留聊天与画面</span>
+          <span class="row-desc">按需隐藏礼物栏、榜单入口等板块</span>
         </span>
         <input class="switch" type="checkbox" data-key="liveClean">
       </label>
+      <div id="liveCustom" class="fold" hidden>
+        <div class="fold-head">
+          <span>勾选要隐藏的板块</span>
+        </div>
+        <div id="liveList" class="nav-list">
+          <label class="chip"><input type="checkbox" data-live-part="gifts"><span>礼物栏</span></label>
+          <label class="chip"><input type="checkbox" data-live-part="ranks"><span>榜单入口</span></label>
+          <label class="chip"><input type="checkbox" data-live-part="footer"><span>首页页脚</span></label>
+          <label class="chip"><input type="checkbox" data-live-part="promo"><span>下载引导</span></label>
+          <label class="chip"><input type="checkbox" data-live-part="head"><span>顶栏推广</span></label>
+        </div>
+        <p class="hint">右侧聊天区、观众榜、主播信息条与播放器控制始终保留。</p>
+      </div>
     </section>
 
     <section class="card">
@@ -131,10 +144,18 @@
       <label class="row">
         <span class="row-main">
           <span class="row-title">顶栏精简</span>
-          <span class="row-desc">只留通知、消息与头像，其余图标隐藏</span>
+          <span class="row-desc">只留勾选的图标与头像，其余隐藏</span>
         </span>
         <input id="headerSimple" class="switch" type="checkbox">
       </label>
+      <div id="headerCustom" class="fold" hidden>
+        <div class="fold-head">
+          <span>勾选要保留的图标，头像始终保留</span>
+          <button id="headerDefaults" class="link-btn" type="button">恢复推荐</button>
+        </div>
+        <div id="headerList" class="nav-list"></div>
+        <p id="headerHint" class="hint"></p>
+      </div>
     </section>
 
     <section class="card">

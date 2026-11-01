@@ -33,6 +33,19 @@
   const onRoom = () => onLive() && !!document.querySelector('[data-e2e="living-container"]');
   const enabled = () => !D.settings || D.settings.liveClean !== false;
 
+  // 分区开关：面板里可以逐项取消（礼物栏 / 榜单入口 / 页脚 / 下载引导 / 顶栏推广）。
+  // 缺字段、类型不对时一律按"开启"处理，避免旧设置把某项永久关掉。
+  function parts() {
+    const p = (D.settings && D.settings.liveParts) || {};
+    return {
+      head: p.head !== false,
+      gifts: p.gifts !== false,
+      ranks: p.ranks !== false,
+      footer: p.footer !== false,
+      promo: p.promo !== false
+    };
+  }
+
   function hide(el) {
     if (!el || el.nodeType !== 1) return;
     if (el.hasAttribute(HIDE_ATTR)) return;
@@ -125,11 +138,12 @@
       D.log('live: 直播站精简已关闭');
       return;
     }
-    hideHeadExtras();
-    hideFooter();
-    hideGiftBar();
-    hideRankEntrance();
-    if (onRoom()) hideAppPromo();
+    const p = parts();
+    if (p.head) hideHeadExtras();
+    if (p.footer) hideFooter();
+    if (p.gifts) hideGiftBar();
+    if (p.ranks) hideRankEntrance();
+    if (p.promo && onRoom()) hideAppPromo();
     try {
       html.setAttribute('data-dyc-live-state', JSON.stringify({
         room: onRoom(), n: marks.length, ts: Date.now()
@@ -138,32 +152,40 @@
     D.log('live: 已精简', marks.length, '个区域');
   }
 
-  // 播放器重渲染会把标记冲掉：只在关键锚点还在、但没被标记时补一次，开销很小
+  // 播放器重渲染会把标记冲掉：只在"关键锚点还在、但没被标记"时补一次，开销很小。
+  // 只检查面板里仍然勾选的分区，取消勾选的部分不再触发重算。
   function verify() {
     if (!onLive() || !enabled()) return;
     if (!document.documentElement.classList.contains('dyc-live')) {
       apply();
       return;
     }
+    const p = parts();
     if (onRoom()) {
-      for (const e2e of GIFT_E2E) {
-        const el = document.querySelector('[data-e2e="' + e2e + '"]');
-        if (el && !el.closest('[' + HIDE_ATTR + ']')) {
-          apply();
-          return;
+      if (p.gifts) {
+        for (const e2e of GIFT_E2E) {
+          const el = document.querySelector('[data-e2e="' + e2e + '"]');
+          if (el && !el.closest('[' + HIDE_ATTR + ']')) {
+            apply();
+            return;
+          }
         }
       }
       // 榜单入口比播放器晚一拍渲染：这里也要盯一眼，否则首次 apply 会漏掉
-      for (const e2e of RANK_E2E) {
-        const el = document.querySelector('[data-e2e="' + e2e + '"]');
-        if (el && !el.closest('[' + HIDE_ATTR + ']')) {
-          apply();
-          return;
+      if (p.ranks) {
+        for (const e2e of RANK_E2E) {
+          const el = document.querySelector('[data-e2e="' + e2e + '"]');
+          if (el && !el.closest('[' + HIDE_ATTR + ']')) {
+            apply();
+            return;
+          }
         }
       }
     }
-    const footer = document.querySelector('[data-e2e="page-footer"]');
-    if (footer && !footer.closest('[' + HIDE_ATTR + ']')) apply();
+    if (p.footer) {
+      const footer = document.querySelector('[data-e2e="page-footer"]');
+      if (footer && !footer.closest('[' + HIDE_ATTR + ']')) apply();
+    }
   }
 
   D.live = {

@@ -67,20 +67,41 @@
   // ① 优先按语义标记定位：顶栏的「通知 / 消息」入口一定在图标组里，
   //    比"找一个圆形头像"可靠得多 —— 未登录时根本没有头像，旧逻辑会直接放弃。
   // ② 找不到时退回原来的"从右上角圆形头像往上找"。
+  //
+  // 真机（2026-11 推荐流）的坑：`im-entry` 往上第一层是个 210×44 的包装层，
+  // 它只有一个子项（把 4 个图标包成一团），旧逻辑取"最外层满足宽度"的层，
+  // kids.length 变成 1 → apply 直接放弃，充钻石 / 壁纸 / 通知 / 消息四个图标全暴露。
+  // 现在要求这一层的可见子项 ≥2 且都是小尺寸，才算图标组。
+  function visibleKids(node) {
+    return Array.from(node.children).filter(k => {
+      const r = k.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    });
+  }
+
+  function looksLikeCluster(node) {
+    const kids = visibleKids(node);
+    if (kids.length < 2 || kids.length > 18) return false;
+    return kids.every(k => {
+      const r = k.getBoundingClientRect();
+      return r.width <= 110 && r.height <= 72;
+    });
+  }
+
   function findCluster() {
     for (const sel of ['[data-e2e="im-entry"]', '[data-e2e="notice-entry"]']) {
       const anchor = document.querySelector(sel);
       if (!anchor) continue;
-      let best = null;
       let node = anchor.parentElement;
       // 不再遇 0 尺寸就 break：抖音用 PACE-ISLAND 微前端，图标组外面常夹一层 0×0 的
       // 宿主节点（直播站 / 搜索结果页），一 break 就找不到图标组，顶栏精简整块失效。
       for (let i = 0; i < 8 && node && node !== document.body; i++, node = node.parentElement) {
         const r = node.getBoundingClientRect();
         if (!(r.height > 0 && r.height < 80 && r.top < 96)) continue;
-        if (r.width > 60 && r.width < 460) best = node;
+        if (!(r.width > 60 && r.width < 460)) continue;
+        if (!looksLikeCluster(node)) continue;   // 包装层 / 聚合层：继续往上找
+        return node;
       }
-      if (best && best.children.length >= 2) return best;
     }
 
     const vw = window.innerWidth;
@@ -188,6 +209,21 @@
     return kept;
   }
 
+  // 有没有"按当前模式应该隐藏、但还没被标记"的图标。
+  // 只检查图标组里的直接子项，开销很小；看门狗每 2 秒调用一次。
+  function hasStale(cluster) {
+    const keep = new Set((D.settings.header && D.settings.header.keep) || []);
+    return visibleKids(cluster).some(k => {
+      if (k.hasAttribute(HIDE_ATTR)) return false;
+      const r = k.getBoundingClientRect();
+      if (r.width > 110 || r.height > 72) return false;   // 搜索框等大块不处理
+      if (isAvatar(k)) return false;                       // 头像始终保留
+      const l = labelOf(k);
+      if (modeOf() === 'custom') return !(l && keepMatch(l, keep));
+      return !!l && !D.KEEP_RE.test(l);                    // simple：有文案且不是保留项
+    });
+  }
+
   D.header = {
     apply() {
       reset();
@@ -237,13 +273,15 @@
     },
 
     // 顶栏图标组同样会被页面重建（切页面 / SPA 重渲染），旧的一次性扫描会失效。
-    // main.js 的 2 秒看门狗调用这里：节点变了或标记没了就重新 apply。
+    // main.js 的 2 秒看门狗调用这里：节点变了、标记没了、或者"该藏却没藏"时重新 apply。
+    // 最后一条是这次补的：抖音会原地替换图标（隐藏标记随旧节点一起消失），
+    // 只判断 hidden.length 会漏，表现为"有时候又冒出来几个"。
     verify() {
       if (modeOf() === 'off') return;
       const cluster = findCluster();
       if (!cluster) return;
       if (cluster !== lastCluster) { this.apply(); return; }
-      if (!hidden.length) this.apply();
+      if (!hidden.length || hasStale(cluster)) this.apply();
     },
 
     reset,

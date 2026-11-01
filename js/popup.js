@@ -14,6 +14,7 @@
 
   let settings = normalize(DEFAULTS);
   let navItems = [];
+  let headerItems = [];
   let connected = false;
   let toastTimer = 0;
 
@@ -39,7 +40,10 @@
     $('#progressStyle').hidden = !settings.progress;
     renderColor();
     $('#navCustom').hidden = settings.nav.mode !== 'custom';
+    $('#liveCustom').hidden = settings.liveClean === false;
+    $('#headerCustom').hidden = settings.header.mode === 'off';
     renderNav();
+    renderLive();
     renderHeader();
   }
 
@@ -89,9 +93,53 @@
     hint.textContent = '未勾选的入口会被隐藏，改动即时生效；一个都不勾选时整条导航隐藏。侧栏底部的备案 / 协议信息（如京ICP）默认隐藏，「AI 抖音」入口始终隐藏。';
   }
 
+  function renderLive() {
+    const parts = settings.liveParts || {};
+    $$('#liveList input[data-live-part]').forEach(el => {
+      el.checked = parts[el.dataset.livePart] !== false;
+    });
+  }
+
   function renderHeader() {
-    const sw = $('#headerSimple');
-    if (sw) sw.checked = settings.header.mode !== 'off';
+    const on = settings.header.mode !== 'off';
+    $('#headerSimple').checked = on;
+
+    const list = $('#headerList');
+    const hint = $('#headerHint');
+    if (!list) return;
+    list.textContent = '';
+    if (!on) return;
+
+    if (!headerItems.length) {
+      hint.textContent = connected
+        ? '当前页面没有识别到顶栏图标；刷新抖音页面后再试。'
+        : '打开抖音网页版并刷新后，这里会列出可保留的顶栏图标。';
+      return;
+    }
+
+    for (const label of headerItems) {
+      const chip = document.createElement('label');
+      chip.className = 'chip';
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = settings.header.keep.indexOf(label) !== -1;
+      cb.addEventListener('change', () => {
+        const keep = new Set(settings.header.keep);
+        if (cb.checked) keep.add(label);
+        else keep.delete(label);
+        settings.header.keep = Array.from(keep);
+        settings.header.mode = 'custom';
+        save();
+      });
+
+      const text = document.createElement('span');
+      text.textContent = label;
+
+      chip.append(cb, text);
+      list.append(chip);
+    }
+    hint.textContent = '未勾选的图标会被隐藏，头像始终保留；一个都不勾选时只留头像。改动即时生效。';
   }
 
   // 立即写 storage：面板随时可能被点外面关掉，延迟保存会丢改动
@@ -131,8 +179,8 @@
     $$('input[data-key]').forEach(el => {
       el.addEventListener('change', () => {
         settings[el.dataset.key] = el.checked;
-        // 进度条开关会带出 / 收起颜色设置块
-        if (el.dataset.key === 'progress') render();
+        // 进度条 / 直播间精简的开关会带出 / 收起对应的设置块
+        if (el.dataset.key === 'progress' || el.dataset.key === 'liveClean') render();
         save();
       });
     });
@@ -167,8 +215,29 @@
     });
 
     $('#headerSimple').addEventListener('change', () => {
-      settings.header.mode = $('#headerSimple').checked ? 'simple' : 'off';
+      // 开关打开 = 按勾选项精简（custom），关闭 = 完全保持原样
+      settings.header.mode = $('#headerSimple').checked ? 'custom' : 'off';
+      render();
       save();
+    });
+
+    const headerDefaults = $('#headerDefaults');
+    if (headerDefaults) {
+      headerDefaults.addEventListener('click', () => {
+        settings.header.mode = 'custom';
+        settings.header.keep = ['通知', '消息'];
+        render();
+        save();
+        toast('已恢复推荐：通知、消息与头像');
+      });
+    }
+
+    $$('#liveList input[data-live-part]').forEach(el => {
+      el.addEventListener('change', () => {
+        settings.liveParts = settings.liveParts || {};
+        settings.liveParts[el.dataset.livePart] = el.checked;
+        save();
+      });
     });
 
     const repo = $('#repoLink');
@@ -227,6 +296,7 @@
       const state = await chrome.tabs.sendMessage(tab.id, { type: 'dyc:get-state' });
       connected = true;
       navItems = (state && Array.isArray(state.navItems)) ? state.navItems.slice(0, 30) : [];
+      headerItems = (state && Array.isArray(state.headerItems)) ? state.headerItems.slice(0, 20) : [];
       $('#ver').textContent = 'v' + (state && state.version ? state.version : chrome.runtime.getManifest().version);
       document.body.dataset.conn = 'on';
       setStatus('已连接当前抖音页面');
