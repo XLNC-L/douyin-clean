@@ -337,9 +337,25 @@
 
     let hits = 0;
     let n = 0;
+
+    // ① 先按语义容器整条标记：播放器自带的「共 N 人推荐」条（.xgplayer-recommend-tag）。
+    //    它内部的文案在指针悬停时会切成「点击推荐」之类，只按"文本以推荐结尾"匹配
+    //    只能命中静止态，整条标记容器后，里面怎么换文案都会一起隐藏。
+    for (const tag of card.querySelectorAll('[class*="recommend-tag"]')) {
+      if (++n > 4) break;
+      const tr = tag.getBoundingClientRect();
+      if (!tr.width || tr.height > 120) continue;
+      if (vr.width && tr.width > vr.width * 1.2) continue;
+      if (tag.hasAttribute('data-dyc-ui')) continue;
+      markInstant(tag);
+      hits++;
+    }
+
+    n = 0;
     for (const el of card.querySelectorAll('div, span, a, section, p, i, em, b, button')) {
       if (++n > 1200) break;
       if (el.contains(v)) continue;
+      if (el.closest('[data-dyc-ui]')) continue;   // 已被上面整条标记的容器覆盖
       if (el.closest('[data-e2e*="comment"], [class*="comment-list"], [class*="comment-panel"]')) continue;
       // 只认"文字几乎就是这句话"的小元素：容器里塞了别的内容就跳过，
       // 避免把整块信息区 / 整张卡片标记掉。

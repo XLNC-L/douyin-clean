@@ -40,6 +40,9 @@
   - 去掉 `document.hasFocus()` 复核 —— `blur` 事件本身就是"窗口已失焦"的证据，而 `hasFocus` 在 `blur` 回调里偶尔还是 `true`，会把这次暂停吞掉；
   - 暂停所有"在画面里还在播"的视频（可见面积 ≥ 4 万像素），而不是只暂停 `D.playingVideo()` 挑出来的那一条 —— 搜索页常有多张卡片同时挂着视频。
   - 新增两个调试探针：`data-dyc-pause`（最近一次失焦暂停的时间戳）与 `data-dyc-replay`（暂停后 3 秒内又被播放器自己续播的时间戳），用来区分"暂停没执行"和"暂停了又被自动恢复"。
+- **「共 N 人推荐」条在浮层收起后仍然显示**：它是播放器自带的容器 `.xgplayer-recommend-tag`（实测宽 1398px、高 38px），旧逻辑按「文本以『推荐』结尾 + 宽 ≤ 340px」匹配，只命中了容器内部那个 136px 的小 pill，整条容器没被标记，所以看着还在；而且这条文案在指针悬停时会变成「点击推荐」，只按文案匹配还容易漏掉别的变体。改为：
+  - JS 按容器语义（`[class*="recommend-tag"]`）整条标记，容器里换什么文案都一起跟着浮层收起；
+  - 再加一条静态 CSS 兜底：`html.dyc-player:not(.dyc-ui-on) [class*="recommend-tag"]` 同样透明 + 禁点击，换片较晚渲染、JS 没赶上时也能隐藏。
 
 ### 验证
 
@@ -47,6 +50,7 @@
 - 真机（`/root/search/把回忆拼好给你`，从推荐页搜索框回车进入）：页面 class 为 `dyc-player dyc-progress-on`（没有 `dyc-feed`），进度线挂在 `.douyin-player` 底部，`scaleX=0.3845` 对应 21.5s / 55.9s；浮层在指针进画面时立即显示、静止 2 秒收起、移出画面保持收起；点击画面被 `preventDefault` 拦下且暂停 / 继续生效。
 - 真实鼠标点击评论图标：`defaultPrevented=false`，右侧「全部评论」面板正常打开；面板本身挂在卡片层（不在 `.slider-video` 内），面板里的点击完全不受影响。画面空白处连续两次点击：`paused` 依次 true → false → true，URL 无 `modal_id`。
 - 搜索页失焦暂停：视频播放中（`paused=false`，t=10.1s）按 `Alt+Tab` 切走窗口，2 秒后复查 `paused=true` 且 `currentTime` 停在 10.9s；切回窗口不会自动恢复播放。
+- 「共 N 人推荐」条（真机推荐流，容器实测 1398×38、内部 pill 136×30）：旧逻辑只有 pill 带 `data-dyc-ui`；重载扩展后往当前卡片注入一条假推荐条并触发浮层重算，容器本身获得 `data-dyc-ui` / `data-dyc-instant`，浮层收起时 `opacity=0`；直接插一条孤立的 `.xgplayer-recommend-tag`（不经过 JS 标记）同样读到 `opacity=0`，说明静态 CSS 兜底也生效。
 
 ### 工程
 

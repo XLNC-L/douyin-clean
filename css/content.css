@@ -78,6 +78,14 @@ html.dyc-player:not(.dyc-ui-on) [data-dyc-ui] {
   pointer-events: none !important;
 }
 
+/* 播放器自带的「共 N 人推荐」条（.xgplayer-recommend-tag）：
+ * 容器类名是稳定的，内部文案会随指针悬停切成「点击推荐」之类，按容器整条收起最稳。
+ * 它与上面的 JS 标记互为兜底：标记没赶上（换片较晚渲染）时，这条 CSS 仍然生效。 */
+html.dyc-player:not(.dyc-ui-on) [class*="recommend-tag"] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 /* ========== 3. 顶栏多余图标 ========== */
 [data-dyc-hide] {
   display: none !important;
