@@ -10,6 +10,14 @@
     pause: true,            // 失焦自动暂停
     overlay: true,          // 标题 / 互动栏自动隐藏
     liveClean: true,        // 直播间精简（礼物栏 / 榜单 / 观众榜等）
+    // 直播间精简的分区开关，面板里可以逐项取消
+    liveParts: {
+      head: true,           // 直播站顶栏的推广入口（充钻石 / 客户端 / 壁纸 / 投稿）
+      gifts: true,          // 直播间底部礼物栏（含更多 / 充值）
+      ranks: true,          // 顶部榜单入口（小时榜 / 游戏榜 / 展位横幅）
+      footer: true,         // 直播站首页页脚
+      promo: true           // 「手机在看的直播？」这类下载 App 浮卡
+    },
     progress: true,         // 视频底部进度细线
     progressColor: '#fe2c55', // 进度细线颜色（6 位 hex）
     header: {
@@ -51,6 +59,8 @@
       ? rawColor
       : DEFAULTS.progressColor;
 
+    const lp = (r.liveParts && typeof r.liveParts === 'object') ? r.liveParts : {};
+
     return {
       quality: r.quality !== false,
       filter: r.filter !== false,
@@ -58,6 +68,13 @@
       pause: r.pause !== false,
       overlay: r.overlay !== false,
       liveClean: r.liveClean !== false,
+      liveParts: {
+        head: lp.head !== false,
+        gifts: lp.gifts !== false,
+        ranks: lp.ranks !== false,
+        footer: lp.footer !== false,
+        promo: lp.promo !== false
+      },
       progress: r.progress !== false,
       progressColor,
       header: { mode: headerMode, keep: headerKeep },
