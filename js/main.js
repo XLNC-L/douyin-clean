@@ -101,6 +101,27 @@
     return false;
   }
 
+  // ---------- 屏蔽双击点赞 ----------
+  // 抖音网页版双击视频画面会点赞（飘心 + 点赞数 +1）。在捕获阶段吃掉
+  // 第二次 click（detail >= 2）与 dblclick，控件区域照常放行。
+  // 必须注册在搜索页「点击暂停」监听之前：否则搜索页双击会先被暂停逻辑吃掉一次，
+  // 表现为"暂停一下又立刻播回去"。
+  function blockDoubleLike(e) {
+    if (D.settings && D.settings.noDoubleLike === false) return;
+    if (!D.route.player) return;
+    if (e.type === 'click' && e.detail < 2) return;
+    const t = e.target;
+    if (!t || t.nodeType !== 1 || !t.closest) return;
+    if (t.closest(PASS_SEL)) return;
+    if (t.closest('.douyin-player-controls, [class*="player-controls"]')) return;
+    if (!t.closest('.slider-video, [data-e2e="feed-active-video"], [data-e2e="feed-item"], .douyin-player')) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }
+
+  document.addEventListener('click', blockDoubleLike, true);
+  document.addEventListener('dblclick', blockDoubleLike, true);
+
   document.addEventListener('click', e => {
     if (D.route.page !== 'search') return;
     const t = e.target;
@@ -328,6 +349,16 @@
     const v = e.target;
     if (!(v instanceof HTMLVideoElement) || !D.route.player) return;
     onNewVideo(v);
+  }, true);
+
+  // 暂停后补标游戏卡片：抖音的推广卡常在暂停后才渲染，而暂停时 <video> 的矩形是 0，
+  // 换片标记与 12 秒补标窗口都覆盖不到。这里在暂停后 0.4s / 1.5s 各补一次。
+  document.addEventListener('pause', e => {
+    const v = e.target;
+    if (!(v instanceof HTMLVideoElement) || !D.route.player) return;
+    if (!D.overlay || !D.overlay.hideGameNow) return;
+    setTimeout(() => { if (D.overlay) D.overlay.hideGameNow(); }, 400);
+    setTimeout(() => { if (D.overlay) D.overlay.hideGameNow(); }, 1500);
   }, true);
 
   // 换片/换清晰度前 src 会被清空（emptied），此时先排一次清晰度判断

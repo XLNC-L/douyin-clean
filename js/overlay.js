@@ -271,6 +271,8 @@
 
   // 类名同样是哈希，按小尺寸 + 固定文案定位；直接永久隐藏，避免跟着浮层切换时慢半拍。
   function markGame(v, vr) {
+    // 面板开关：关掉后游戏卡片原样显示
+    if (D.settings && D.settings.hideGame === false) return;
     // 优先用整张活动卡：游戏卡片可能挂在播放器外层，cardOf 只到 .slider-video 会漏
     const card = v.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"]') ||
       cardOf(v, vr) || v.parentElement;
@@ -525,6 +527,20 @@
 
   D.overlay = {
     sync,
+    // 暂停时补标游戏卡片：抖音的推广卡常在暂停后才渲染，而且此时 <video> 被暂停层
+    // 盖住、矩形为 0，用所在卡片的矩形作参照（由 main.js 的 pause 监听调用）。
+    hideGameNow() {
+      if (!enabled() || !D.route.player) return;
+      const v = activeVideo() || currentVideo || D.playingVideo();
+      if (!v || !v.isConnected || D.isOverlayVideo(v)) return;
+      let vr = v.getBoundingClientRect();
+      if (!vr.width || !vr.height) {
+        const card = v.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"]');
+        vr = card ? card.getBoundingClientRect() : vr;
+      }
+      if (!vr.width || !vr.height) return;
+      markGame(v, vr);
+    },
     // 周期性补标（main.js 的 2 秒看门狗调用）：游戏卡片 / 推荐卡片经常比视频晚一步渲染，
     // 只在换片时标一次会漏。这里只扫左下角两类小卡片，每个视频最多补 6 次（约 12 秒）。
     tick() {
@@ -533,13 +549,20 @@
       if (tickLeft <= 0) return;
       const v = activeVideo() || currentVideo || D.playingVideo();
       if (!v || !v.isConnected || D.isOverlayVideo(v)) return;
-      const vr = v.getBoundingClientRect();
+      let vr = v.getBoundingClientRect();
+      // 暂停时 <video> 的矩形是 0，退回卡片矩形，否则整段补标直接 return
+      if (!vr.width || !vr.height) {
+        const card = v.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"]');
+        vr = card ? card.getBoundingClientRect() : vr;
+      }
       if (!vr.width || !vr.height) return;
       tickLeft--;
       if (!gameDone) markGame(v, vr);
       if (!recDone) recDone = markRecommend(v, vr) > 0;
     },
     applySettings() {
+      // 关掉「游戏卡片」开关时，把之前永久隐藏的卡片恢复回来
+      if (D.settings && D.settings.hideGame === false) clearPermanent();
       if (!D.route.player) {
         clearMarks();
         clearPermanent();
