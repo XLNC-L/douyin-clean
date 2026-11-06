@@ -9,6 +9,8 @@
     live: true,             // 推荐流中的直播间自动跳过
     pause: true,            // 失焦自动暂停
     overlay: true,          // 标题 / 互动栏自动隐藏
+    hideGame: true,         // 隐藏左下角游戏推广卡片（暂停时出现的也一起隐藏）
+    noDoubleLike: true,     // 屏蔽双击视频画面点赞
     liveClean: true,        // 直播间精简（礼物栏 / 榜单 / 观众榜等）
     // 直播间精简的分区开关，面板里可以逐项取消
     liveParts: {
@@ -67,6 +69,8 @@
       live: r.live !== false,
       pause: r.pause !== false,
       overlay: r.overlay !== false,
+      hideGame: r.hideGame !== false,
+      noDoubleLike: r.noDoubleLike !== false,
       liveClean: r.liveClean !== false,
       liveParts: {
         head: lp.head !== false,
