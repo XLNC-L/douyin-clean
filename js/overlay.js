@@ -411,7 +411,23 @@
     // 聊天页 / 弹层里的播放器不参与信息流浮层标记
     if (D.isOverlayVideo(v)) return;
     const vr = v.getBoundingClientRect();
-    if (!vr.width || !vr.height) return;
+    if (!vr.width || !vr.height) {
+      // 图文：卡片里没有可见的 <video>（矩形为 0），抖音把轮播挂在一个 0×0 的视频上。
+      // 视频专用的信息区 / 互动栏没有参照，这里只做清理 + 游戏 / 推荐卡片标记，
+      // 否则整段直接 return，图片内容上的「游戏 XX」推广卡会一直露着。
+      const card = v.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"]');
+      const cr = card ? card.getBoundingClientRect() : null;
+      if (!cr || !cr.width || !cr.height) return;
+      currentVideo = v;
+      syncAt = performance.now();
+      currentRect = cr;
+      clearMarks();
+      markGame(v, cr);
+      recDone = markRecommend(v, cr) > 0;
+      if (v.paused || !wasInside) hide();
+      D.log('overlay: 图文卡片，仅补标游戏 / 推荐卡片');
+      return;
+    }
 
     // 同一个视频 500ms 内只重新标记一次，避免事件密集时反复查 DOM
     const now = performance.now();
