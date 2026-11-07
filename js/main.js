@@ -423,6 +423,28 @@
   //   ② 暂停所有"在画面里还在播"的视频，而不是只暂停 D.playingVideo() 挑出来的那一条。
   //      搜索页常有多张卡片同时挂着视频，只暂停一条看起来就像"没生效"。
   let pausedByBlurAt = 0;
+  // 图文：抖音把轮播挂在一个 0×0 的 <video> 上（图片按它的 currentTime 切换），
+  // 这种视频可见面积是 0，上面的规则会跳过，所以之前切到后台图片仍在自动翻页。
+  // 这里只处理"卡片里没有可见视频、但有大幅图片"的活动卡片。
+  function pauseGallery() {
+    const card = document.querySelector('[data-e2e="feed-active-video"]');
+    if (!card) return 0;
+    const videos = Array.from(card.querySelectorAll('video'));
+    if (!videos.length) return 0;
+    if (videos.some(v => D.visibleArea(v) >= 40000)) return 0;   // 普通视频，交给上面的规则
+    const hasBigPic = Array.from(card.querySelectorAll('img')).some(img => {
+      const r = img.getBoundingClientRect();
+      return r.width >= 300 && r.height >= 300;
+    });
+    if (!hasBigPic) return 0;
+    let n = 0;
+    for (const v of videos) {
+      if (v.paused || v.ended) continue;
+      try { v.pause(); n++; } catch (e) { /* 忽略 */ }
+    }
+    return n;
+  }
+
   function pauseActive() {
     if (!D.route.player) return;
     if (!D.settings || D.settings.pause === false) return;
@@ -432,6 +454,7 @@
       if (D.visibleArea(v) < 40000) continue;      // 只暂停真正显示在画面上的
       try { v.pause(); hit++; } catch (e) { /* 忽略 */ }
     }
+    hit += pauseGallery();
     if (hit) {
       pausedByBlurAt = Date.now();
       D.log('pause: 页面失去焦点，已自动暂停', hit, '条');
