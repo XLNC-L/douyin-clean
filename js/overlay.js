@@ -313,6 +313,65 @@
     }
   }
 
+  // 画面里内嵌的「直播小窗」：一个 337×189 的推荐窗，内部叠 <video> + <canvas>，
+  // 文案是「直播加载中」，外层 <a> 带 LiveLinkA，根节点是 <div data-e2e="feed-live">。
+  // 真机记录（2026-11）证实它和热播头像浮窗是两个独立元素，需要分别处理。
+  // 用 feed-live / LiveLinkA 两个标识，配合尺寸与「内部必须有 video 或 canvas」避免
+  // 误伤真正的直播间页面（真实直播间播放器远大于这个尺寸）。
+  function markLiveWindow() {
+    let n = 0;
+    for (const el of document.querySelectorAll('[data-e2e="feed-live"], a[class*="LiveLinkA"]')) {
+      if (el.hasAttribute('data-dyc-hide')) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 80 || r.height < 60 || r.width > 760 || r.height > 560) continue;
+      if (!el.querySelector('video, canvas')) continue;
+      hidePermanent(el);
+      n++;
+    }
+    return n;
+  }
+
+  // 推广类浮层的统一入口：热播头像浮窗 + 内嵌直播小窗
+  function markPromos() {
+    return markLivePromo() + markLiveWindow();
+  }
+
+  // 画面右侧「作者正在直播」的头像浮窗。
+  // 真机结构（2026-11）：<a data-e2e="web_homepage_hot"> 内部同时有
+  //   ① 头像本体 SPAN.semi-avatar-wrapper —— 必须保留
+  //   ② 红色脉冲圈 SPAN.semi-avatar-additionalBorder —— 隐藏
+  //   ③ 左上角红底「直播」角标（底图 avatar-live.png）—— 隐藏
+  //   ④ 头像下方的关注红加号 —— 隐藏
+  // 早期整块隐藏会把头像一起干掉、只剩一个红加号，所以改为只标这三样，
+  // 并用 mark() 跟其他浮层信息一起显隐，而不是永久隐藏。
+  // 它会跟着换片重新挂载，因此除换片时标一次，看门狗 tick 也要补标。
+  function markLivePromo() {
+    let n = 0;
+    for (const a of document.querySelectorAll('a[data-e2e="web_homepage_hot"]')) {
+      const box = a.getBoundingClientRect();
+      if (box.width < 20 || box.width > 140) continue;
+      // ① 红色脉冲圈
+      for (const el of a.querySelectorAll('[class*="additionalBorder"]')) {
+        mark(el);
+        n++;
+      }
+      // ② 左上角红底「直播」角标（底图是 avatar-live.png，不能连头像一起藏）
+      for (const img of a.querySelectorAll('img[src*="avatar-live"]')) {
+        const tag = img.closest('div') || img;
+        mark(tag);
+        n++;
+      }
+      // ③ 头像下方的关注红加号
+      for (const el of a.querySelectorAll('[class*="semi-icon"], [class*="follow"], [class*="Follow"]')) {
+        const r = el.getBoundingClientRect();
+        if (r.width < 8 || r.width > 40 || r.height < 8 || r.height > 40) continue;
+        mark(el);
+        n++;
+      }
+    }
+    return n;
+  }
+
   // 「推荐」类浮层统一处理（v1.9.11 重做）。
   // 这一类在抖音上有三种形态，以前只认了前两种、而且尺寸下限写死 40px：
   //   ① 左下角「某某 推荐」卡片（带图标，通常 40px 以上宽）；
@@ -423,6 +482,7 @@
       currentRect = cr;
       clearMarks();
       markGame(v, cr);
+      markPromos();
       recDone = markRecommend(v, cr) > 0;
       if (v.paused || !wasInside) hide();
       D.log('overlay: 图文卡片，仅补标游戏 / 推荐卡片');
@@ -444,6 +504,7 @@
     markOverlays(v, vr);
     markExtra(v, vr);
     markGame(v, vr);
+    markPromos();
     recDone = markRecommend(v, vr) > 0;
     // 新视频默认保持干净；但鼠标还在画面里时不要突然隐藏，
     // 否则会表现为"刚动一下就瞬间消失"，和 2 秒延迟的规则不一致。
@@ -555,12 +616,15 @@
         vr = card ? card.getBoundingClientRect() : vr;
       }
       if (!vr.width || !vr.height) return;
+      markPromos();
       markGame(v, vr);
     },
     // 周期性补标（main.js 的 2 秒看门狗调用）：游戏卡片 / 推荐卡片经常比视频晚一步渲染，
     // 只在换片时标一次会漏。这里只扫左下角两类小卡片，每个视频最多补 6 次（约 12 秒）。
     tick() {
       if (!enabled() || !D.route.player) return;
+      // 热播头像浮窗 / 内嵌直播小窗随时会被重新挂载，先无条件补标，不被下面的次要任务计数挡住
+      markPromos();
       if (gameDone && recDone) return;
       if (tickLeft <= 0) return;
       const v = activeVideo() || currentVideo || D.playingVideo();

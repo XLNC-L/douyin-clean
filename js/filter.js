@@ -85,6 +85,78 @@
   // 恢复播放后由 main.js 的 2 秒看门狗调用 retryPending() 补跳。
   let pendingSkip = null;
 
+  // ---------- 手动返回过的不再自动跳过 ----------
+  // 需求：自动跳过的广告 / 直播，如果用户又手动滑回来了，说明他其实想看，
+  // 之后遇到这一条不再跳，避免"感兴趣的内容被略过"。
+  // 身份用视频 ID（data-e2e-vid），存 chrome.storage.local，最多保留 200 条。
+  const NO_SKIP_KEY = 'dyc_noSkip';
+  const NO_SKIP_MAX = 200;
+  const respectBack = () => !D.settings || D.settings.respectBack !== false;
+  let noSkip = new Set();
+  let pendingBack = null;          // { vid, at }：刚刚被自动跳过的那条
+
+  function saveNoSkip() {
+    try {
+      const list = Array.from(noSkip).slice(-NO_SKIP_MAX);
+      noSkip = new Set(list);
+      chrome.storage.local.set({ [NO_SKIP_KEY]: list });
+    } catch (e) { /* 忽略 */ }
+  }
+
+  try {
+    if (chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get({ [NO_SKIP_KEY]: [] }, res => {
+        noSkip = new Set((res && res[NO_SKIP_KEY]) || []);
+        D.log('filter: 已载入不再跳过的视频', noSkip.size, '条');
+      });
+    }
+  } catch (e) { /* 忽略 */ }
+
+  function vidOf(video) {
+    if (!video) return '';
+    const card = video.closest('[data-e2e="feed-item"], [data-e2e="feed-active-video"], .slider-video');
+    if (card) {
+      const own = card.getAttribute && card.getAttribute('data-e2e-vid');
+      if (own) return own;
+      const el = card.querySelector && card.querySelector('[data-e2e-vid]');
+      const inner = el && el.getAttribute('data-e2e-vid');
+      if (inner) return inner;
+    }
+    // 直播卡片没有 data-e2e-vid：拿不到 ID 时整个"手动返回不再跳"就失效，
+    // 所以退一步用直播间指纹（作者 + 标题）当身份。
+    // 真机文案形如：「连播 点击或按 进入直播间 直播中 @某某 【标题】 1522.5万」，
+    // 热度数字会变，必须剥掉，否则每次刷新都算成不同直播。
+    const live = video.closest('[data-e2e="feed-live"]');
+    if (live) {
+      const raw = String(live.innerText || '').replace(/\s+/g, ' ');
+      // 优先只用作者名（@xxx）：标题和热度都会变，作者名在同一场直播里是稳定的
+      const who = /@([^\s【]+)/.exec(raw);
+      if (who) return 'L:' + who[1].slice(0, 40);
+      const t = raw
+        .replace(/连播|点击或按|进入直播间|直播中|直播已结束/g, '')
+        .replace(/[\d.]+\s*[万亿]?/g, '')
+        .trim();
+      if (t) return 'L:' + t.slice(0, 60);
+    }
+    return '';
+  }
+
+  // 兜底：跳过后的 8 秒内用户往上滑，就把滑到的那一条记进名单。
+  // 直播卡片没有稳定 ID，指纹在「直播加载中」和加载完成两种状态下不一致，
+  // 光靠指纹匹配会漏，所以再加一条按行为判断的路径。
+  window.addEventListener('wheel', e => {
+    if (!respectBack() || e.deltaY >= 0) return;
+    if (!lastSkip || Date.now() - lastSkip > 8000) return;
+    setTimeout(() => {
+      const v = D.playingVideo();
+      const vid = v && vidOf(v);
+      if (!vid) return;
+      noSkip.add(vid);
+      saveNoSkip();
+      D.log('filter: 跳过后向上滑回，记入不再跳过', vid);
+    }, 700);
+  }, true);
+
   function cardOf(video) {
     return video.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"], .slider-video') ||
       video.parentElement || document.body;
@@ -351,6 +423,15 @@
       }
     }
 
+    // 4.5) 播放器根节点是 feed-live 且占满画面 = 全屏直播。
+    // 抖音现在大量直播间用 data-e2e="feed-live" 作为容器，旧的 LIVE_MARK_SEL 认不到，
+    // 表现就是"全屏直播跳过不灵敏"。内嵌的小直播窗也是 feed-live，用宽度 700 区分。
+    const feedLive = video.closest('[data-e2e="feed-live"]');
+    if (feedLive && visibleBox(feedLive)) {
+      const fr = feedLive.getBoundingClientRect();
+      if (fr.width > 700) return '直播(全屏直播)';
+    }
+
     // 5) 「直播中 / 正在直播 / 进入直播间」文字与头像直播圈不参与判定：
     //    那只能说明作者正在直播，当前视频仍可能是普通视频。
     return '';
@@ -423,6 +504,22 @@
   const STRONG_HIT_RE = /^(购物卡片|广告标识|电商浮层|推广浮层|推广按钮|店铺账号|手动屏蔽|ad)/;
 
   function next(video, force) {
+    // 双保险：用户滑回刚被跳过的那条时，之前排队的跳转定时器仍可能打到这儿，
+    // 绕过 judge 里的检查。真正切条前再确认一次，命中就放弃本次跳过。
+    if (respectBack() && video) {
+      const vid = vidOf(video);
+      if (vid && noSkip.has(vid)) return;
+      if (vid && pendingBack && pendingBack.vid === vid &&
+          pendingBack.gen !== D.gen && Date.now() - pendingBack.at > 900) {
+        noSkip.add(vid);
+        saveNoSkip();
+        pendingBack = null;
+        D.log('filter: 用户手动滑回（跳转前拦截），之后不再跳', vid);
+        publish('手动返回，记入不再跳过', 0);
+        return;
+      }
+    }
+
     // 用户暂停了就别跳：暂停状态下切走视频，观感就是"暂停被取消并划到下一条"。
     // force=true 表示命中的是强信号，允许在暂停状态直接切（否则广告会一直钉在暂停画面上）。
     if (video && video.paused && !force) return;
@@ -441,6 +538,14 @@
       return;
     }
     lastSkip = now;
+
+    // 记下这一条的身份：用户如果手动滑回来，就记进"不再跳过"名单。
+    // 同时记下当前代次，只有"确实切走过"（代次变了）才算用户主动返回，
+    // 否则切条失败、视频还停在原处时会被误判成"用户滑回来了"。
+    if (respectBack()) {
+      const vid = vidOf(video);
+      if (vid) pendingBack = { vid, at: now, gen: D.gen };
+    }
 
     const genAt = D.gen;
     const step = i => {
@@ -494,6 +599,28 @@
       st.gen = -1;
     }
     if (D.isOverlayVideo(video)) return;
+
+    // 用户手动滑回来的视频：尊重他的意愿，不再自动跳过。
+    // pendingBack 是刚刚自动跳过的那条，用户一旦又滑回来（间隔 >1.2 秒，
+    // 避开切条动画自身的短暂停顿）就记进黑名单。
+    if (respectBack()) {
+      const vid = vidOf(video);
+      if (vid) {
+        if (noSkip.has(vid)) {
+          publish('手动返回过，不再跳过', 0);
+          return;
+        }
+        if (pendingBack && pendingBack.vid === vid &&
+            pendingBack.gen !== D.gen && Date.now() - pendingBack.at > 900) {
+          noSkip.add(vid);
+          saveNoSkip();
+          pendingBack = null;
+          D.log('filter: 用户手动滑回被跳过的视频，之后不再跳', vid);
+          publish('手动返回，记入不再跳过', 0);
+          return;
+        }
+      }
+    }
 
     // 换了视频就重置判定状态（用代次，不用 duration/src —— 它们经常是 Infinity/空串）
     if (D.gen !== st.gen) st = { gen: D.gen, passes: 0, blocked: false, last: 0, retryAt: 0, firstAt: 0, skipFail: 0 };

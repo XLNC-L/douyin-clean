@@ -7,6 +7,7 @@
     quality: true,          // 自动最高清晰度
     filter: true,           // 广告 / 带货过滤 + 直播小窗清理
     live: true,             // 推荐流中的直播间自动跳过
+    respectBack: true,      // 手动滑回被跳过的广告 / 直播后，这一条不再自动跳过
     pause: true,            // 失焦自动暂停
     overlay: true,          // 标题 / 互动栏自动隐藏
     hideGame: true,         // 隐藏左下角游戏推广卡片（暂停时出现的也一起隐藏）
@@ -71,6 +72,7 @@
       overlay: r.overlay !== false,
       hideGame: r.hideGame !== false,
       noDoubleLike: r.noDoubleLike !== false,
+      respectBack: r.respectBack !== false,
       liveClean: r.liveClean !== false,
       liveParts: {
         head: lp.head !== false,
