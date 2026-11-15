@@ -45,7 +45,8 @@ html.dyc-player :has(+ [data-e2e="video-play-more"]) {
 }
 
 /* 「某某 推荐」这类卡片要求跟信息同步，不要额外的淡入淡出/动画，避免慢半拍 */
-html.dyc-player [data-dyc-instant] {
+html.dyc-player [data-dyc-instant],
+html.dyc-player [data-dyc-instant] * {
   transition: none !important;
   animation: none !important;
 }
@@ -61,7 +62,7 @@ html.dyc-player [data-dyc-instant] {
  *      这两个挂在互动栏最底部，类名全是哈希；点赞等按钮有静态规则兜底，
  *      它们没有，所以这里按 data-e2e 和相邻关系直接命中，不依赖 JS 标记。
  * 评论区是用户手动开关的，用 [data-e2e="comment-list"] 从①里排除掉。 */
-html.dyc-player:not(.dyc-ui-on) .slider-video > *:not(:has(video)):not(:has([data-e2e="comment-list"], [data-e2e*="comment-panel"], [class*="comment-list"], [class*="comment-panel"])),
+html.dyc-player:not(.dyc-ui-on) .slider-video > *:not(:has(video)):not(:has([data-e2e="comment-list"], [data-e2e*="comment-panel"], [class*="comment-list"], [class*="comment-panel"])):not([class*="basePlayerContainer"]):not([class*="playerContainer"]):not([class*="xgplayer"]),
 html.dyc-player:not(.dyc-ui-on) .video-info-detail,
 html.dyc-player:not(.dyc-ui-on) [data-e2e="video-player-digg"],
 html.dyc-player:not(.dyc-ui-on) [data-e2e="feed-comment-icon"],

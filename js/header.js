@@ -147,31 +147,14 @@
   }
 
   function applySimple(kids) {
-    const labels = kids.map(labelOf);
-    const useLabels = labels.filter(Boolean).length >= 2;
-
-    // 没有可用标签时的兜底：保留最右侧三个
-    const rightmost = new Set(
-      kids.slice().sort((a, b) => b.getBoundingClientRect().right - a.getBoundingClientRect().right).slice(0, 3)
-    );
-
+    // 默认精简 = 只保留头像和搜索框这类大块，其余图标入口一律隐藏。
+    // 以前这里默认保留「通知 / 消息」，导致头像旁总还剩两个图标露在外面；
+    // 想留下某些入口请切到「自定义」逐个勾选。
     let kept = 0;
-    kids.forEach((k, i) => {
+    kids.forEach(k => {
       const r = k.getBoundingClientRect();
       if (r.width > 110 || r.height > 72) { kept++; return; } // 搜索框等大块不处理
       if (isAvatar(k)) { kept++; return; }
-
-      const l = labels[i];
-      const cls = typeof k.className === 'string' ? k.className : '';
-      if (D.KEEP_RE.test(l) || D.KEEP_RE.test(cls)) { kept++; return; }
-
-      // 有可读标签但不是保留入口：直接隐藏
-      if (useLabels && l) {
-        markHidden(k);
-        return;
-      }
-
-      if (rightmost.has(k)) { kept++; return; }
       markHidden(k);
     });
     return kept;
@@ -242,6 +225,13 @@
       if (kids.length < 2 || kids.length > 18) return false;
 
       const kept = modeOf() === 'custom' ? applyCustom(kids) : applySimple(kids);
+      // 观测用：面板里看到"隐藏不全"时，可从这里直接读出模式、候选项与标签
+      try {
+        document.documentElement.setAttribute('data-dyc-header', JSON.stringify({
+          mode: modeOf(), kids: kids.length, hidden: hidden.length,
+          labels: kids.map(labelOf)
+        }));
+      } catch (e) { /* 忽略 */ }
       D.log('header: 模式=' + modeOf(), '保留入口', kept, '个，隐藏', hidden.length, '个');
       return true;
     },

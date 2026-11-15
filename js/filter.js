@@ -121,15 +121,28 @@
       const el = card.querySelector && card.querySelector('[data-e2e-vid]');
       const inner = el && el.getAttribute('data-e2e-vid');
       if (inner) return inner;
+      // 真机实测（2026-11）：抖音已经不再给卡片写 data-e2e-vid，
+      // 上面的两条恒为空，所以视频 / 广告都退回下面的链接与文案身份。
+      if (card.querySelectorAll) {
+        for (const a of card.querySelectorAll('a[href*="aweme_id="]')) {
+          const m = /aweme_id=(\d{8,})/.exec(a.getAttribute('href') || '');
+          if (m) return m[1];
+        }
+        for (const a of card.querySelectorAll('a[href*="/video/"]')) {
+          const m = /\/video\/(\d{8,})/.exec(a.getAttribute('href') || '');
+          if (m) return m[1];
+        }
+        const desc = card.querySelector('.video-info-detail, [data-e2e*="video-desc"], [data-e2e*="video-info"]');
+        if (desc) {
+          const t = String(desc.innerText || '').replace(/\s+/g, ' ').trim();
+          if (t) return 'T:' + t.slice(0, 50);
+        }
+      }
     }
-    // 直播卡片没有 data-e2e-vid：拿不到 ID 时整个"手动返回不再跳"就失效，
-    // 所以退一步用直播间指纹（作者 + 标题）当身份。
-    // 真机文案形如：「连播 点击或按 进入直播间 直播中 @某某 【标题】 1522.5万」，
-    // 热度数字会变，必须剥掉，否则每次刷新都算成不同直播。
+    // 直播卡片另外用作者名当身份（没有 aweme_id，标题和热度都会变）
     const live = video.closest('[data-e2e="feed-live"]');
     if (live) {
       const raw = String(live.innerText || '').replace(/\s+/g, ' ');
-      // 优先只用作者名（@xxx）：标题和热度都会变，作者名在同一场直播里是稳定的
       const who = /@([^\s【]+)/.exec(raw);
       if (who) return 'L:' + who[1].slice(0, 40);
       const t = raw
@@ -141,20 +154,24 @@
     return '';
   }
 
-  // 兜底：跳过后的 8 秒内用户往上滑，就把滑到的那一条记进名单。
-  // 直播卡片没有稳定 ID，指纹在「直播加载中」和加载完成两种状态下不一致，
-  // 光靠指纹匹配会漏，所以再加一条按行为判断的路径。
-  window.addEventListener('wheel', e => {
-    if (!respectBack() || e.deltaY >= 0) return;
-    if (!lastSkip || Date.now() - lastSkip > 8000) return;
+  // 兜底：跳过后的 20 秒内用户往上滑（滚轮或 ↑ / PageUp），就把滑到的那一条记进名单。
+  // 广告 / 直播卡片的文案在不同渲染阶段可能不一致，光靠身份匹配会漏，
+  // 所以再加一条按行为判断的路径。
+  const onManualBack = () => {
+    if (!respectBack()) return;
+    if (!lastSkip || Date.now() - lastSkip > 20000) return;
     setTimeout(() => {
       const v = D.playingVideo();
       const vid = v && vidOf(v);
       if (!vid) return;
       noSkip.add(vid);
       saveNoSkip();
-      D.log('filter: 跳过后向上滑回，记入不再跳过', vid);
+      D.log('filter: 跳过后手动返回，记入不再跳过', vid);
     }, 700);
+  };
+  window.addEventListener('wheel', e => { if (e.deltaY < 0) onManualBack(); }, true);
+  window.addEventListener('keydown', e => {
+    if (e.key === 'ArrowUp' || e.key === 'PageUp') onManualBack();
   }, true);
 
   function cardOf(video) {

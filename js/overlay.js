@@ -322,11 +322,30 @@
     let n = 0;
     for (const el of document.querySelectorAll('[data-e2e="feed-live"], a[class*="LiveLinkA"]')) {
       if (el.hasAttribute('data-dyc-hide')) continue;
+      // 关键区分：内嵌直播小窗是"叠在视频上的独立浮层"，
+      // 而搜索页 / 信息流的视频卡片本身也在 .slider-video / .douyin-player 里。
+      // 不排除的话会把整张视频卡片 display:none，表现为视频区域空白、高度为 0。
+      if (el.closest('.slider-video, .douyin-player, [data-e2e="feed-item"]')) continue;
       const r = el.getBoundingClientRect();
-      if (r.width < 80 || r.height < 60 || r.width > 760 || r.height > 560) continue;
-      if (!el.querySelector('video, canvas')) continue;
+      if (r.width < 120 || r.height < 80 || r.width > 480 || r.height > 300) continue;
+      if (!el.querySelector('video')) continue;
+      if (!el.querySelector('canvas')) continue;
       hidePermanent(el);
       n++;
+      // 只隐藏内层会留下一个黑底空框：向上找尺寸接近、且自己有背景色的容器一并隐藏。
+      let host = el.parentElement;
+      for (let i = 0; i < 2 && host && host !== document.body; i++, host = host.parentElement) {
+        if (host.closest('.slider-video, .douyin-player, [data-e2e="feed-item"]')) break;
+        const hr = host.getBoundingClientRect();
+        if (hr.width > 480 || hr.height > 300) break;
+        if (Math.abs(hr.width - r.width) > 60 || Math.abs(hr.height - r.height) > 60) break;
+        const cs = getComputedStyle(host);
+        if (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' || cs.backgroundImage !== 'none') {
+          hidePermanent(host);
+          n++;
+          break;
+        }
+      }
     }
     return n;
   }
@@ -350,24 +369,40 @@
     for (const a of document.querySelectorAll('a[data-e2e="web_homepage_hot"]')) {
       const box = a.getBoundingClientRect();
       if (box.width < 20 || box.width > 140) continue;
-      // ① 红色脉冲圈
+      // 整个浮窗（含头像本体）跟随其他浮层信息显隐，不再常驻
+      mark(a);
+      a.setAttribute('data-dyc-instant', '');   // 去掉直播头像的呼吸缩放动画
+      n++;
+      // 红圈、「直播」角标、关注加号永久隐藏：头像保留，但不该再像"正在直播"
       for (const el of a.querySelectorAll('[class*="additionalBorder"]')) {
-        mark(el);
+        hidePermanent(el);
         n++;
       }
-      // ② 左上角红底「直播」角标（底图是 avatar-live.png，不能连头像一起藏）
       for (const img of a.querySelectorAll('img[src*="avatar-live"]')) {
-        const tag = img.closest('div') || img;
-        mark(tag);
+        hidePermanent(img.closest('div') || img);
         n++;
       }
-      // ③ 头像下方的关注红加号
       for (const el of a.querySelectorAll('[class*="semi-icon"], [class*="follow"], [class*="Follow"]')) {
         const r = el.getBoundingClientRect();
         if (r.width < 8 || r.width > 40 || r.height < 8 || r.height > 40) continue;
-        mark(el);
+        hidePermanent(el);
         n++;
       }
+    }
+    // 兜底：抖音有时换掉外层 data-e2e，或头像浮窗从别的入口挂载，
+    // 这时按「直播」角标底图反推整个浮窗，不依赖固定选择器。
+    for (const img of document.querySelectorAll('img[src*="avatar-live"]')) {
+      hidePermanent(img.closest('div') || img);
+      let host = img.parentElement;
+      for (let i = 0; i < 5 && host && host !== document.body; i++, host = host.parentElement) {
+        const r = host.getBoundingClientRect();
+        if (r.width >= 20 && r.width <= 140 && r.height >= 20 && r.height <= 140) {
+          mark(host);
+          host.setAttribute('data-dyc-instant', '');
+          break;
+        }
+      }
+      n++;
     }
     return n;
   }
@@ -624,7 +659,7 @@
     tick() {
       if (!enabled() || !D.route.player) return;
       // 热播头像浮窗 / 内嵌直播小窗随时会被重新挂载，先无条件补标，不被下面的次要任务计数挡住
-      markPromos();
+      try { markPromos(); } catch (err) { /* 单个浮窗异常不影响其余补标 */ }
       if (gameDone && recDone) return;
       if (tickLeft <= 0) return;
       const v = activeVideo() || currentVideo || D.playingVideo();
@@ -674,4 +709,25 @@
       rectAt = 0;
     }
   };
+  // 头像浮窗 / 内嵌直播小窗经常在换片后临时挂载、几秒后又被整体重建。
+  // 只靠 2 秒轮询会漏（标签页不可见时 main.js 的看门狗还会直接跳过），
+  // 所以这里监听新增节点，浮窗一出现就立刻补标。
+  try {
+    const mo = new MutationObserver(list => {
+      for (const m of list) {
+        for (const node of m.addedNodes) {
+          if (node.nodeType !== 1) continue;
+          const direct = node.matches &&
+            node.matches('a[data-e2e="web_homepage_hot"], [data-e2e="feed-live"], a[class*="LiveLinkA"]');
+          const inner = node.querySelector &&
+            node.querySelector('img[src*="avatar-live"], [data-e2e="feed-live"], a[class*="LiveLinkA"]');
+          if (direct || inner) {
+            markPromos();
+            return;
+          }
+        }
+      }
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+  } catch (e) { /* 忽略 */ }
 })();

@@ -134,9 +134,12 @@
     if (t.closest('.douyin-player-controls, [class*="player-controls"]')) return;
     if (hitButton(card, e.clientX, e.clientY)) return;
     const v = card.querySelector('video');
-    if (!v) return;
+    // 搜索页改版后，封面卡片在点击前不会创建 <video>。以前这里直接 return，
+    // 等于放行，点击就跳进 ?modal_id 全屏。现在一律先拦住跳转，
+    // 没有视频时交给抖音自己在卡片内加载播放。
     e.preventDefault();
     e.stopImmediatePropagation();
+    if (!v) return;
     if (!v.paused) {
       try { v.pause(); } catch (err) { /* 忽略 */ }
       return;
