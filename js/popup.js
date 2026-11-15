@@ -63,9 +63,31 @@
     list.textContent = '';
 
     if (!navItems.length) {
-      hint.textContent = connected
-        ? '当前页面没有识别到左侧导航项；切换模式后刷新抖音页面再试。'
-        : '打开抖音网页版并刷新后，这里会列出可保留的导航项；也可以直接使用「仅保留我的」。';
+      // 当前标签不是抖音页时，用常见导航项兜底，避免「自定义」区空白
+      if (connected) {
+        hint.textContent = '当前页面没有识别到左侧导航项；先用下面的常见入口勾选，刷新抖音页后生效。';
+      } else {
+        hint.textContent = '打开抖音网页版并刷新后，这里会列出可保留的导航项；也可以先按常见入口勾选。';
+      }
+      for (const label of ['首页', '推荐', '关注', '朋友', '我的', '收藏', '观看历史']) {
+        const chip = document.createElement('label');
+        chip.className = 'chip';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = settings.nav.keep.indexOf(label) !== -1;
+        cb.addEventListener('change', () => {
+          const keepSet = new Set(settings.nav.keep);
+          if (cb.checked) keepSet.add(label);
+          else keepSet.delete(label);
+          settings.nav.keep = Array.from(keepSet);
+          settings.nav.mode = 'custom';
+          save();
+        });
+        const span = document.createElement('span');
+        span.textContent = label;
+        chip.append(cb, span);
+        list.append(chip);
+      }
       return;
     }
 
@@ -111,9 +133,34 @@
     if (!on) return;
 
     if (!headerItems.length) {
-      hint.textContent = connected
-        ? '当前页面没有识别到顶栏图标；刷新抖音页面后再试。'
-        : '打开抖音网页版并刷新后，这里会列出可保留的顶栏图标。';
+      // 当前标签不是抖音页（或还没识别到顶栏）时，用常见入口兜底，
+      // 免得「自定义」区一片空白，看起来像功能没了。
+      const defaults = ['通知', '消息', '投稿', '壁纸', '客户端', '充钻石'];
+      if (connected) {
+        hint.textContent = '当前页面没有识别到顶栏图标；先用下面的常见入口勾选，刷新抖音页后生效。';
+      } else {
+        hint.textContent = '打开抖音网页版并刷新后，这里会列出可保留的顶栏图标；也可以先按常见入口勾选。';
+      }
+      for (const label of defaults) {
+        const chip = document.createElement('label');
+        chip.className = 'chip';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = settings.header.keep.indexOf(label) !== -1;
+        cb.addEventListener('change', () => {
+          const keepSet = new Set(settings.header.keep);
+          if (cb.checked) keepSet.add(label);
+          else keepSet.delete(label);
+          settings.header.keep = Array.from(keepSet);
+          settings.header.mode = 'custom';
+          save();
+        });
+        chip.appendChild(cb);
+        const span = document.createElement('span');
+        span.textContent = label;
+        chip.appendChild(span);
+        list.appendChild(chip);
+      }
       return;
     }
 
