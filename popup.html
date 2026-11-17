@@ -38,6 +38,17 @@
         </span>
         <input class="switch" type="checkbox" data-key="quality">
       </label>
+      <label class="row" id="qualityCapRow">
+        <span class="row-main">
+          <span class="row-title">清晰度上限</span>
+          <span class="row-desc">默认最高；压到 1080P 可避免 4K 换流带来的卡顿</span>
+        </span>
+        <select class="select" id="qualityCap">
+          <option value="max">最高</option>
+          <option value="1080">1080P</option>
+          <option value="720">720P</option>
+        </select>
+      </label>
       <label class="row">
         <span class="row-main">
           <span class="row-title">失焦自动暂停</span>
@@ -147,9 +158,11 @@
       <h2>左侧导航</h2>
       <div class="seg" role="radiogroup" aria-label="左侧导航模式">
         <label><input type="radio" name="navMode" value="hide"><span>整条隐藏</span></label>
+        <label><input type="radio" name="navMode" value="drawer"><span>抽屉</span></label>
         <label><input type="radio" name="navMode" value="custom"><span>自定义保留</span></label>
         <label><input type="radio" name="navMode" value="off"><span>保持原样</span></label>
       </div>
+      <p class="hint">「抽屉」：侧栏收起，鼠标移到屏幕最左边（约 12px）时滑出。</p>
       <div id="navCustom" class="fold" hidden>
         <div class="fold-head">
           <span>勾选要保留的板块，其余隐藏</span>

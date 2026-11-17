@@ -251,6 +251,25 @@ h2 {
 
 label.row:hover .row-title { color: var(--accent); }
 
+/* ---------- 下拉选择（清晰度上限） ---------- */
+.select {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  height: 26px;
+  padding: 0 22px 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background-color: var(--card);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+.select:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+
 /* ---------- 开关 ---------- */
 .switch {
   appearance: none;

@@ -74,13 +74,18 @@
   // 按事件开关循环会漏掉一部分视频 —— 表现就是"有的视频能同步快进快退，有的却不动"。
   // 每帧只读一次 currentTime 并与上次比较，值没变就什么都不写，
   // 一帧的开销是两次属性读取，远小于一次样式计算。
+  //
+  // 降频：60Hz 重绘对主线程是纯浪费，肉眼也看不出 60fps 和 20fps 的进度条差别。
+  // 改成每 3 帧算一次（约 20 次/秒）；拖动、快进、跳转仍由媒体事件即时触发 paint()，
+  // 所以操作手感不受影响，只是匀速走的时候少画三分之二。
+  let tick = 0;
   function loop() {
     rafId = 0;
     if (!enabled() || !D.route.player) return;
     retarget();                        // 每 120ms 确认一次"线条该挂在哪条视频上"
     if (bar && video) {
       alignBar();                      // 每 400ms 对齐一次视频实际画面
-      if (!document.hidden) paint();
+      if (!document.hidden && ++tick % 3 === 0) paint();
     }
     if (!rafId) rafId = requestAnimationFrame(loop);
   }

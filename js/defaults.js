@@ -5,6 +5,9 @@
   'use strict';
   const DEFAULTS = {
     quality: true,          // 自动最高清晰度
+    // 清晰度上限：'max' 不限 / '1080' 最高 1080P / '720' 最高 720P。
+    // 默认最高；弱网或低配机可以压到 1080，避免 4K 换流带来的卡顿。
+    qualityCap: 'max',
     filter: true,           // 广告 / 带货过滤 + 直播小窗清理
     live: true,             // 推荐流中的直播间自动跳过
     respectBack: true,      // 手动滑回被跳过的广告 / 直播后，这一条不再自动跳过
@@ -28,7 +31,7 @@
       keep: ['通知', '消息'] // custom 模式下要保留的图标文案
     },
     nav: {
-      mode: 'hide',         // hide=整条隐藏 | custom=逐项保留 | off=保持原样
+      mode: 'hide',         // hide=整条隐藏 | drawer=抽屉（左边缘悬停滑出）| custom=逐项保留 | off=保持原样
       keep: ['我的']        // custom 模式下要保留的导航项文案
     }
   };
@@ -37,7 +40,8 @@
   function normalize(raw) {
     const r = (raw && typeof raw === 'object') ? raw : {};
     const nav = (r.nav && typeof r.nav === 'object') ? r.nav : {};
-    const mode = (nav.mode === 'custom' || nav.mode === 'off') ? nav.mode : 'hide';
+    const mode = (nav.mode === 'custom' || nav.mode === 'off' || nav.mode === 'drawer')
+      ? nav.mode : 'hide';
     const keep = Array.isArray(nav.keep)
       ? nav.keep
         .filter(s => typeof s === 'string' && s && s.length <= 24)
@@ -64,8 +68,11 @@
 
     const lp = (r.liveParts && typeof r.liveParts === 'object') ? r.liveParts : {};
 
+    const cap = ['max', '1080', '720'].indexOf(r.qualityCap) !== -1 ? r.qualityCap : 'max';
+
     return {
       quality: r.quality !== false,
+      qualityCap: cap,
       filter: r.filter !== false,
       live: r.live !== false,
       pause: r.pause !== false,

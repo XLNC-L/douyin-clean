@@ -154,16 +154,20 @@
     return '';
   }
 
-  // 兜底：跳过后的 20 秒内用户往上滑（滚轮或 ↑ / PageUp），就把滑到的那一条记进名单。
+  // 兜底：跳过之后用户往上滑（滚轮或 ↑ / PageUp），就把滑到的那一条记进名单。
   // 广告 / 直播卡片的文案在不同渲染阶段可能不一致，光靠身份匹配会漏，
   // 所以再加一条按行为判断的路径。
+  //
+  // 早期这里用「跳过后 20 秒内」的时间窗，用户看得久一点再滑回来就失效了。
+  // 现在改成比对 pendingBack 里记下的身份：只要滑回来的正是刚被跳过的那一条，
+  // 多晚都认；滑到别的视频则不记，避免把无关内容永久放进名单。
   const onManualBack = () => {
-    if (!respectBack()) return;
-    if (!lastSkip || Date.now() - lastSkip > 20000) return;
+    if (!respectBack() || !pendingBack) return;
+    const want = pendingBack.vid;
     setTimeout(() => {
       const v = D.playingVideo();
       const vid = v && vidOf(v);
-      if (!vid) return;
+      if (!vid || vid !== want) return;
       noSkip.add(vid);
       saveNoSkip();
       D.log('filter: 跳过后手动返回，记入不再跳过', vid);
@@ -442,11 +446,17 @@
 
     // 4.5) 播放器根节点是 feed-live 且占满画面 = 全屏直播。
     // 抖音现在大量直播间用 data-e2e="feed-live" 作为容器，旧的 LIVE_MARK_SEL 认不到，
-    // 表现就是"全屏直播跳过不灵敏"。内嵌的小直播窗也是 feed-live，用宽度 700 区分。
+    // 表现就是"全屏直播跳过不灵敏"。内嵌的小直播窗也是 feed-live，靠尺寸区分。
+    //
+    // 单看宽度会被侧边推荐栏坑到：全屏直播在带推荐栏的布局里实际宽度可能压到 700 以下，
+    // 于是被当成小窗漏跳。所以再补两条互相独立的正向判据：
+    //   · 高度接近视口（小窗固定 189 高，远达不到）；
+    //   · 容器内 video 的宽度也接近视口（小窗的 video 只有几十像素）。
     const feedLive = video.closest('[data-e2e="feed-live"]');
     if (feedLive && visibleBox(feedLive)) {
       const fr = feedLive.getBoundingClientRect();
-      if (fr.width > 700) return '直播(全屏直播)';
+      const vr = video.getBoundingClientRect();
+      if (fr.width > 700 || fr.height > 420 || vr.width > 700) return '直播(全屏直播)';
     }
 
     // 5) 「直播中 / 正在直播 / 进入直播间」文字与头像直播圈不参与判定：

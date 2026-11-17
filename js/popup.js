@@ -38,6 +38,8 @@
       el.checked = el.value === settings.nav.mode;
     });
     $('#progressStyle').hidden = !settings.progress;
+    $('#qualityCapRow').hidden = !settings.quality;
+    $('#qualityCap').value = settings.qualityCap || 'max';
     renderColor();
     $('#navCustom').hidden = settings.nav.mode !== 'custom';
     $('#liveCustom').hidden = settings.liveClean === false;
@@ -230,6 +232,11 @@
         if (el.dataset.key === 'progress' || el.dataset.key === 'liveClean') render();
         save();
       });
+    });
+
+    $('#qualityCap').addEventListener('change', () => {
+      settings.qualityCap = $('#qualityCap').value;
+      save();
     });
 
     const colorInput = $('#progressColor');

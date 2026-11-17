@@ -276,15 +276,26 @@
     const s = await stableSnap(g);
     if (id !== job || got4K) { closeMenu(g); queuedGen = -1; return; }
 
-    const rows = s.rows.slice().sort((a, b) => b.rk - a.rk);
+    // 清晰度上限：面板可选「最高 / 1080P / 720P」，默认最高。
+    // 上限不仅限制我们往上切，也用于把已经更高的画质主动降下来——
+    // 选 1080 的人要的就是避免 4K 换流带来的卡顿。
+    const LIMIT = { max: 99, '1080': 7, '720': 6 };
+    const capKey = (D.settings && D.settings.qualityCap) || 'max';
+    const capRk = LIMIT[capKey] || 99;
+
+    const sorted = s.rows.slice().sort((a, b) => b.rk - a.rk);
+    let rows = sorted.filter(r => r.rk <= capRk);
+    if (!rows.length) rows = sorted.slice(0, 1);   // 只有超限档时退回最高档，保证能播
     if (!rows.length) { closeMenu(g); queuedGen = -1; return D.log('quality: 没读到任何档位'); }
 
     const before = actualMax(v);
     const top = rows[0];
-    D.log('quality: 当前=' + (s.cur || '未知'), '实测=' + before + 'p', '最高档=' + top.txt);
+    const overCap = capRk < 99 && top.nom > 0 && before > top.nom * 1.4;
+    D.log('quality: 当前=' + (s.cur || '未知'), '实测=' + before + 'p',
+      '目标档=' + top.txt, overCap ? '(超上限，待降档)' : '');
 
-    // 实测分辨率已经到最高档的标称值：不需要动作
-    if (top.nom > 0 && before >= top.nom * 0.9) {
+    // 实测分辨率已经到目标档的标称值：不需要动作
+    if (top.nom > 0 && before >= top.nom * 0.9 && !overCap) {
       maxedGen = gen0;                 // 这条视频到此为止，后续 emptied 不再重开菜单
       if (top.rk >= R4K) {
         got4K = true;
@@ -329,7 +340,7 @@
         let clicked = 0;
         for (const row of rows) {
           if (got4K || clicked >= 1) break;                        // 只点一次，不链式降级
-          if (row.nom > 0 && before >= row.nom * 0.9) continue;     // 这一档实测已经达标
+          if (row.nom > 0 && before >= row.nom * 0.9 && !overCap) continue;  // 这一档实测已经达标
           if (isDead(row.txt)) continue;                            // 这一档在本次视频里试过且失败
 
           const el = freshItem(g, row.txt);

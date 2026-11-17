@@ -41,6 +41,20 @@
 
   const navOf = () => document.querySelector(NAV_SEL);
 
+  // 抽屉模式：侧栏整体不收进 DOM，只在最左侧留一条透明热区（12px 宽）。
+  // 鼠标移到热区上时 CSS 用 :has() 把侧栏滑出来，移开自动缩回。
+  // 热区必须是真实元素——伪元素没法控制兄弟节点，而侧栏和热区不是同一个父层。
+  function ensureZone(need) {
+    const cur = document.querySelector('.dyc-nav-zone');
+    if (need && !cur) {
+      const z = document.createElement('div');
+      z.className = 'dyc-nav-zone';
+      document.body.appendChild(z);
+    } else if (!need && cur) {
+      cur.remove();
+    }
+  }
+
   // 自定义模式下"一个都不保留"等价于整条隐藏；其他模式不受 keep 影响
   function fullHidden() {
     const s = D.settings.nav;
@@ -285,7 +299,10 @@
       // 导航精简是全站生效的（我的 / 收藏 / 搜索 / 详情页都保持一致），
       // 不再要求 html.dyc-feed —— 只在刷视频页面生效会表现为"换个页面侧栏又出来了"。
       const hidden = fullHidden();
+      const drawer = D.settings.nav.mode === 'drawer';
       document.documentElement.classList.toggle('dyc-nav-hidden', hidden);
+      document.documentElement.classList.toggle('dyc-nav-drawer', drawer);
+      ensureZone(drawer);
       clearMarks();
       hideForced();
 
@@ -340,7 +357,9 @@
       lastNav = null;
       clearMarks();
       clearForced();
+      ensureZone(false);
       document.documentElement.classList.remove('dyc-nav-hidden');
+      document.documentElement.classList.remove('dyc-nav-drawer');
     }
   };
 })();

@@ -101,6 +101,28 @@
     hide(best);
   }
 
+  // 画面上的「8434本场点赞」统计标签：纯展示，没有交互，挡在画面右下角。
+  // 实测它的文案就是「数字 + 本场点赞」，外面还套了两三层同样宽度的容器，
+  // 所以从文本节点向上收拢到"宽度不超过 260、高度不超过 60"的那一层再隐藏。
+  function hideLikeStat() {
+    let n = 0;
+    for (const el of document.querySelectorAll('div, span')) {
+      if (++n > 900) break;
+      if (el.childElementCount > 1) continue;
+      const t = D.textOf(el);
+      if (!t || !/^\d+本场点赞$/.test(t)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 40 || r.width > 220 || r.height < 12 || r.height > 40) continue;
+      let box = el;
+      while (box.parentElement && box.parentElement !== document.body) {
+        const pr = box.parentElement.getBoundingClientRect();
+        if (pr.width > 260 || pr.height > 60) break;
+        box = box.parentElement;
+      }
+      hide(box);
+    }
+  }
+
   // 顶部榜单入口（小时榜 / 游戏榜 / 展位 banner）：语义标记，直接隐藏
   function hideRankEntrance() {
     for (const e2e of RANK_E2E) {
@@ -141,7 +163,7 @@
     const p = parts();
     if (p.head) hideHeadExtras();
     if (p.footer) hideFooter();
-    if (p.gifts) hideGiftBar();
+    if (p.gifts) { hideGiftBar(); hideLikeStat(); }
     if (p.ranks) hideRankEntrance();
     if (p.promo && onRoom()) hideAppPromo();
     try {

@@ -15,6 +15,34 @@ html.dyc-nav-hidden #douyin-navigation {
   display: none !important;
 }
 
+/* 抽屉模式：侧栏整条收进左侧之外，只在左边缘留一条 12px 热区；
+   鼠标移到热区或侧栏上时滑出，移开自动缩回。 */
+html.dyc-nav-drawer #douyin-navigation {
+  /* 收起：用负外边距把整条侧栏推出视口左侧。
+     不用 transform —— 抖音会给侧栏写内联 transform 做折叠动画，覆盖不掉；
+     也不用 position:fixed —— 它的宽度依赖原 flex 布局，脱离文档流后会塌成 0。
+     负 margin 两者都避开：宽高保持原样，内容区自动左移填补，不留白边。 */
+  margin-left: -180px !important;
+  opacity: 0;
+  visibility: hidden;
+  transition: margin-left .2s cubic-bezier(.4, 0, .2, 1), opacity .2s ease, visibility .2s;
+}
+html.dyc-nav-drawer #douyin-navigation:hover,
+html.dyc-nav-drawer:has(.dyc-nav-zone:hover) #douyin-navigation {
+  margin-left: 0 !important;
+  opacity: 1;
+  visibility: visible;
+}
+html.dyc-nav-drawer .dyc-nav-zone {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  z-index: 2147482999;
+  background: transparent;
+}
+
 /* 逐项保留：JS 只给"要隐藏的入口行"打标记，保留项（例如「我的」）不受影响 */
 #douyin-navigation [data-dyc-nav-hide] {
   display: none !important;

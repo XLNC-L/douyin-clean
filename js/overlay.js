@@ -213,6 +213,9 @@
       if (el.contains(v)) continue;
       // 评论区是手动开关的面板，里面的评论 / 商品链接不参与自动隐藏
       if (el.closest('[data-e2e*="comment"], [class*="comment-list"], [class*="comment-panel"]')) continue;
+      // 弹幕：实测新版弹幕层挂在 basePlayerContainer 下、不在 .xgplayer / .douyin-player 里，
+      // 上面那条播放器排除兜不住，导致每条弹幕都被当成浮层标记，鼠标一停就整片消失。
+      if (el.closest('.danmu, [class*="danmu" i], [class*="barrage" i]')) continue;
       const r = el.getBoundingClientRect();
       if (r.width < 10 || r.height < 10) continue;
       if (!D.near(r, vr, 24)) continue;
@@ -712,22 +715,20 @@
   // 头像浮窗 / 内嵌直播小窗经常在换片后临时挂载、几秒后又被整体重建。
   // 只靠 2 秒轮询会漏（标签页不可见时 main.js 的看门狗还会直接跳过），
   // 所以这里监听新增节点，浮窗一出现就立刻补标。
+  //
+  // 性能：抖音每秒会新增几十上百个节点（弹幕、评论、骨架屏），
+  // 原先在回调里对每个新增节点做 matches + querySelector 全树查询，
+  // 弹幕一多就明显掉帧。现在回调只安排一次合并检查，真正的查询最多每 150ms 一次。
+  let promoTimer = 0;
+  function schedulePromos() {
+    if (promoTimer) return;
+    promoTimer = setTimeout(() => {
+      promoTimer = 0;
+      markPromos();
+    }, 150);
+  }
   try {
-    const mo = new MutationObserver(list => {
-      for (const m of list) {
-        for (const node of m.addedNodes) {
-          if (node.nodeType !== 1) continue;
-          const direct = node.matches &&
-            node.matches('a[data-e2e="web_homepage_hot"], [data-e2e="feed-live"], a[class*="LiveLinkA"]');
-          const inner = node.querySelector &&
-            node.querySelector('img[src*="avatar-live"], [data-e2e="feed-live"], a[class*="LiveLinkA"]');
-          if (direct || inner) {
-            markPromos();
-            return;
-          }
-        }
-      }
-    });
+    const mo = new MutationObserver(() => schedulePromos());
     mo.observe(document.body, { childList: true, subtree: true });
   } catch (e) { /* 忽略 */ }
 })();
