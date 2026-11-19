@@ -69,7 +69,10 @@
   const LIVE_LINK_SEL = 'a[href*="live.douyin.com"], a[href*="/live/"]';
   const LIVE_PLAYER_SEL = '[class*="LivePlayer_"], [class*="webcast-chatroom"]';
   const LIVE_MARK_SEL = '[data-e2e*="live-room"], [data-e2e*="livecard"], [data-e2e*="web_live"]';
-  const MAX_LIVE_STREAK = 5;     // 连续跳过这么多条直播后先停一下，避免推荐流全是直播时无限切
+  // 连续跳过这么多条直播后先停一下，避免推荐流全是直播时无限切。
+  // 原来只给 5 条，实测正常推荐流里连着六七条直播很常见，数到 5 就进 20 秒冷却，
+  // 用户感受到的就是"忽然不跳了"。放宽到 15，并把冷却压到 10 秒。
+  const MAX_LIVE_STREAK = 15;
   let liveStreak = 0;
   let liveCooldownUntil = 0;     // 直播冷却截止时间：冷却期内不再跳直播，也不重判
   // 抖音复用同一个 <video> 元素播放所有视频，判定状态不能挂在元素上：
@@ -78,8 +81,11 @@
   // duration 常为 Infinity、currentSrc 常为空串，所有这类视频会撞成同一个 key，
   // 判定次数攒满后整条推荐流都不再检查（历史 bug，表现为"广告从不跳"）。
   // 现在统一用 main.js 维护的代次 D.gen：每换一条视频 +1。
-  let st = { gen: -1, passes: 0, blocked: false, last: 0, retryAt: 0, firstAt: 0, skipFail: 0 };
+  let st = { gen: -1, passes: 0, blocked: false, last: 0, retryAt: 0, firstAt: 0, skipFail: 0, hitAt: 0 };
   let lastSkip = 0;
+  // 复核定时器只保留一条链：媒体事件和看门狗都会调 judge，各自再排定时器的话，
+  // 60 秒窗口内会叠出多条并行的扫描链，白白多耗 CPU。
+  let judgeTimer = 0;
   // 命中但视频处于暂停状态时的"待跳"记录：暂停中不切走（暂停层里常带推荐 / 商品卡，
   // 切走会让用户觉得"暂停被取消"），但也不能像旧版那样直接放弃并永久 blocked。
   // 恢复播放后由 main.js 的 2 秒看门狗调用 retryPending() 补跳。
@@ -90,10 +96,16 @@
   // 之后遇到这一条不再跳，避免"感兴趣的内容被略过"。
   // 身份用视频 ID（data-e2e-vid），存 chrome.storage.local，最多保留 200 条。
   const NO_SKIP_KEY = 'dyc_noSkip';
+  const NO_SKIP_VER_KEY = 'dyc_noSkipVer';
+  // 名单判定规则换代：旧版会在每次判定里隐式比对身份，抖音切条后的回吸 /
+  // 预加载旧 <video> 都会被当成"用户手动返回"，把大量直播和广告误拉黑，
+  // 表现就是"刷着刷着直播再也不跳了"。换新规则时清掉旧名单（一次性）。
+  const NO_SKIP_VER = 2;
   const NO_SKIP_MAX = 200;
   const respectBack = () => !D.settings || D.settings.respectBack !== false;
   let noSkip = new Set();
-  let pendingBack = null;          // { vid, at }：刚刚被自动跳过的那条
+  let pendingBack = null;          // { vid, at, gen }：刚刚被自动跳过的那条
+  let userBack = null;             // { vid, at }：用户确实手动滑回来的那条
 
   function saveNoSkip() {
     try {
@@ -105,7 +117,13 @@
 
   try {
     if (chrome.storage && chrome.storage.local) {
-      chrome.storage.local.get({ [NO_SKIP_KEY]: [] }, res => {
+      chrome.storage.local.get({ [NO_SKIP_KEY]: [], [NO_SKIP_VER_KEY]: 0 }, res => {
+        if ((res && res[NO_SKIP_VER_KEY] || 0) < NO_SKIP_VER) {
+          noSkip = new Set();
+          chrome.storage.local.set({ [NO_SKIP_KEY]: [], [NO_SKIP_VER_KEY]: NO_SKIP_VER });
+          D.log('filter: 旧版"手动返回"名单不可信，已清空');
+          return;
+        }
         noSkip = new Set((res && res[NO_SKIP_KEY]) || []);
         D.log('filter: 已载入不再跳过的视频', noSkip.size, '条');
       });
@@ -140,7 +158,17 @@
       }
     }
     // 直播卡片另外用作者名当身份（没有 aweme_id，标题和热度都会变）
-    const live = video.closest('[data-e2e="feed-live"]');
+    // 容器不在 video 祖先链上时（卡片重渲染后 feed-live 变成兄弟层），
+    // 退到活动卡片里找，否则身份恒为空、「手动返回不再跳」对直播完全失效。
+    let live = video.closest('[data-e2e="feed-live"]');
+    if (!live) {
+      const card = video.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"]');
+      if (card) {
+        for (const el of card.querySelectorAll('[data-e2e="feed-live"]')) {
+          if (el.getBoundingClientRect().width > 200) { live = el; break; }
+        }
+      }
+    }
     if (live) {
       const raw = String(live.innerText || '').replace(/\s+/g, ' ');
       const who = /@([^\s【]+)/.exec(raw);
@@ -154,23 +182,27 @@
     return '';
   }
 
-  // 兜底：跳过之后用户往上滑（滚轮或 ↑ / PageUp），就把滑到的那一条记进名单。
-  // 广告 / 直播卡片的文案在不同渲染阶段可能不一致，光靠身份匹配会漏，
-  // 所以再加一条按行为判断的路径。
-  //
-  // 早期这里用「跳过后 20 秒内」的时间窗，用户看得久一点再滑回来就失效了。
-  // 现在改成比对 pendingBack 里记下的身份：只要滑回来的正是刚被跳过的那一条，
-  // 多晚都认；滑到别的视频则不记，避免把无关内容永久放进名单。
+  // 「手动返回」只在用户真的用手势往回滑时记录（向上滚轮 / ↑ / PageUp）。
+  // 旧版还在 judge / next 里按身份隐式认定"用户回来了"，但抖音切条后的
+  // scroll-snap 回吸、播放器预加载让旧 <video> 仍是 playingVideo 等情形，
+  // 都会被误判成用户返回 —— 名单越攒越多，最后直播和广告全都不跳了。
+  // 现在只有这里会写名单，并且要求代次确实变过（证明真的切走了）。
   const onManualBack = () => {
     if (!respectBack() || !pendingBack) return;
     const want = pendingBack.vid;
+    const genAt = pendingBack.gen;
     setTimeout(() => {
+      if (D.gen === genAt) return;             // 根本没切走，不算返回
       const v = D.playingVideo();
       const vid = v && vidOf(v);
       if (!vid || vid !== want) return;
-      noSkip.add(vid);
-      saveNoSkip();
-      D.log('filter: 跳过后手动返回，记入不再跳过', vid);
+      userBack = { vid, at: Date.now() };
+      if (!noSkip.has(vid)) {
+        noSkip.add(vid);
+        saveNoSkip();
+      }
+      pendingBack = null;
+      D.log('filter: 用户手动滑回，之后不再跳', vid);
     }, 700);
   };
   window.addEventListener('wheel', e => { if (e.deltaY < 0) onManualBack(); }, true);
@@ -383,9 +415,14 @@
     if (s.strong) return s.strong;
     if (s.weak.length >= 2) return '带货(' + s.weak.join('+') + ')';
 
-    // 3) 店铺账号：旗舰店 / 专卖店 / 专营店 / 小店
-    hit = shopAuthorHit(card, vr);
-    if (hit) return hit;
+    // 3) 店铺账号：只凭昵称（旗舰店 / 专卖店 / 专营店 / 小店）不足以判定带货 ——
+    //    商家号发日常内容很常见，实测「爱悦享成人用品专营店」发的健身视频
+    //    被整条误跳。现在要求同时已经出现一条弱带货信号（价格 / 购买按钮 / 营销话术）
+    //    才把它当第二条证据。
+    if (s.weak.length >= 1) {
+      hit = shopAuthorHit(card, vr);
+      if (hit) return '带货(店铺账号+' + s.weak.join('+') + ')';
+    }
 
     // 4) 兜底：卡片容器认错时（视频不在预期的卡片结构里），
     //    退一步在整页找"贴着视频画面"的商品卡 —— 它固定在左下角，不随画面变化。
@@ -412,8 +449,20 @@
     const livePlayer = video.closest(LIVE_PLAYER_SEL);
     const player = video.closest('.xgplayer, .douyin-player, [class*="basePlayerContainer" i]') || null;
 
-    // 1) 播放器根节点本身就是直播播放器 / 直播聊天室
-    if (livePlayer && visibleBox(livePlayer)) return '直播(直播播放器)';
+    // 1) 播放器根节点本身就是直播播放器 / 直播聊天室。
+    // 但抖音会在普通视频之间复用 LivePlayer_* 容器（PreCreatePlayer / Preview），
+    // 只按类名判会把「刚从直播间滑出来的那条普通视频」整条误跳 ——
+    // 用户看到的就是"误判，跳过了上一条视频"。
+    // 补两条独立佐证：容器要把视频画面盖住，且视频时长是 Infinity（直播流特征；
+    // 普通视频是有限时长，实测 15.6 / 333.0 这类）。未起播的直播由 4.5 段兜底。
+    if (livePlayer && visibleBox(livePlayer)) {
+      const lr = livePlayer.getBoundingClientRect();
+      const vr1 = video.getBoundingClientRect();
+      // 高度门槛别省：预创建容器的视频是 0×0，退化成 "0 >= 0" 会一路通过。
+      const covers = vr1.width > 300 && vr1.height > 200 &&
+        lr.width >= vr1.width * 0.8 && lr.height >= vr1.height * 0.6;
+      if (covers && video.duration === Infinity) return '直播(直播播放器)';
+    }
 
     // 2) 控制条把总时长换成了「直播」标签（普通视频隐藏）
     for (const root of [livePlayer, player]) {
@@ -444,19 +493,34 @@
       }
     }
 
-    // 4.5) 播放器根节点是 feed-live 且占满画面 = 全屏直播。
-    // 抖音现在大量直播间用 data-e2e="feed-live" 作为容器，旧的 LIVE_MARK_SEL 认不到，
-    // 表现就是"全屏直播跳过不灵敏"。内嵌的小直播窗也是 feed-live，靠尺寸区分。
+    // 4.5) feed-live 容器：抖音现在大量直播间用它，旧的 LIVE_MARK_SEL 认不到。
     //
-    // 单看宽度会被侧边推荐栏坑到：全屏直播在带推荐栏的布局里实际宽度可能压到 700 以下，
-    // 于是被当成小窗漏跳。所以再补两条互相独立的正向判据：
-    //   · 高度接近视口（小窗固定 189 高，远达不到）；
-    //   · 容器内 video 的宽度也接近视口（小窗的 video 只有几十像素）。
-    const feedLive = video.closest('[data-e2e="feed-live"]');
-    if (feedLive && visibleBox(feedLive)) {
-      const fr = feedLive.getBoundingClientRect();
+    // 早期要求它必须包住 video（video.closest），但卡片重渲染时 feed-live
+    // 经常是后来才插进来的兄弟层或更外层的包裹，closest 会落空 ——
+    // 表现就是"有的直播跳、有的不跳"。现在改成在整张活动卡片里找，
+    // 再用「矩形覆盖住视频区域」和尺寸把内嵌小窗排除掉（小窗固定 337×189）。
+    const liveCard = card || video.parentElement;
+    if (liveCard) {
       const vr = video.getBoundingClientRect();
-      if (fr.width > 700 || fr.height > 420 || vr.width > 700) return '直播(全屏直播)';
+      for (const el of liveCard.querySelectorAll('[data-e2e="feed-live"]')) {
+        if (!visibleBox(el)) continue;
+        const fr = el.getBoundingClientRect();
+        // 内嵌直播小窗实测 337×189，用它自己的尺寸就能排除；
+        // 这里绝不能拿「视频宽度 > 700」当判据 —— 桌面端正常视频都超过 700，
+        // 只要卡片里挂了小窗就会把普通视频整条判成直播跳掉。
+        if (fr.width < 500 || fr.height < 300) continue;
+        // 容器必须在视口内（卡片容器里可能带着预加载、在屏幕外的直播卡片）
+        if (fr.right < 0 || fr.left > window.innerWidth) continue;
+        const ox = Math.min(fr.right, vr.right) - Math.max(fr.left, vr.left);
+        const oy = Math.min(fr.bottom, vr.bottom) - Math.max(fr.top, vr.top);
+        if (vr.width > 0 && vr.height > 0) {
+          // 盖住视频画面的大部分才算直播间（小窗只占右下角一小块）
+          if (ox > vr.width * 0.6 && oy > vr.height * 0.5) return '直播(全屏直播)';
+        } else if (ox > fr.width * 0.6 && oy > fr.height * 0.4) {
+          // 视频还没出画面（刚滚到这一条）时退回按容器自身算
+          return '直播(全屏直播)';
+        }
+      }
     }
 
     // 5) 「直播中 / 正在直播 / 进入直播间」文字与头像直播圈不参与判定：
@@ -525,26 +589,18 @@
   }
 
   // 只有"强信号"命中的广告才允许在暂停状态下也直接跳：
-  // 购物卡片容器 / 官方广告标识 / 电商浮层 / 推广按钮 / 店铺账号，都是平台结构或固定文案，
+  // 购物卡片容器 / 官方广告标识 / 电商浮层 / 推广按钮，都是平台结构或固定文案，
   // 不属于暂停层里"相关推荐"那种模棱两可的内容。
   // 弱信号（靠价格 / 购买按钮 / 营销话术凑两条）在暂停时容易误判，仍然等恢复播放再判。
-  const STRONG_HIT_RE = /^(购物卡片|广告标识|电商浮层|推广浮层|推广按钮|店铺账号|手动屏蔽|ad)/;
+  const STRONG_HIT_RE = /^(购物卡片|广告标识|电商浮层|推广浮层|推广按钮|手动屏蔽|ad)/;
 
   function next(video, force) {
-    // 双保险：用户滑回刚被跳过的那条时，之前排队的跳转定时器仍可能打到这儿，
+    // 双保险：用户刚用手势滑回这一条时，之前排队的跳转定时器仍可能打到这儿，
     // 绕过 judge 里的检查。真正切条前再确认一次，命中就放弃本次跳过。
     if (respectBack() && video) {
       const vid = vidOf(video);
       if (vid && noSkip.has(vid)) return;
-      if (vid && pendingBack && pendingBack.vid === vid &&
-          pendingBack.gen !== D.gen && Date.now() - pendingBack.at > 900) {
-        noSkip.add(vid);
-        saveNoSkip();
-        pendingBack = null;
-        D.log('filter: 用户手动滑回（跳转前拦截），之后不再跳', vid);
-        publish('手动返回，记入不再跳过', 0);
-        return;
-      }
+      if (vid && userBack && userBack.vid === vid && Date.now() - userBack.at < 3000) return;
     }
 
     // 用户暂停了就别跳：暂停状态下切走视频，观感就是"暂停被取消并划到下一条"。
@@ -627,9 +683,8 @@
     }
     if (D.isOverlayVideo(video)) return;
 
-    // 用户手动滑回来的视频：尊重他的意愿，不再自动跳过。
-    // pendingBack 是刚刚自动跳过的那条，用户一旦又滑回来（间隔 >1.2 秒，
-    // 避开切条动画自身的短暂停顿）就记进黑名单。
+    // 用户手动滑回来过的视频：尊重他的意愿，不再自动跳过。
+    // 名单只由 onManualBack（真实手势）写入，这里只读，不再按身份隐式认定。
     if (respectBack()) {
       const vid = vidOf(video);
       if (vid) {
@@ -637,20 +692,18 @@
           publish('手动返回过，不再跳过', 0);
           return;
         }
-        if (pendingBack && pendingBack.vid === vid &&
-            pendingBack.gen !== D.gen && Date.now() - pendingBack.at > 900) {
-          noSkip.add(vid);
-          saveNoSkip();
-          pendingBack = null;
-          D.log('filter: 用户手动滑回被跳过的视频，之后不再跳', vid);
-          publish('手动返回，记入不再跳过', 0);
+        if (userBack && userBack.vid === vid && Date.now() - userBack.at < 3000) {
+          publish('用户刚滑回，暂不跳过', 0);
           return;
         }
       }
     }
 
     // 换了视频就重置判定状态（用代次，不用 duration/src —— 它们经常是 Infinity/空串）
-    if (D.gen !== st.gen) st = { gen: D.gen, passes: 0, blocked: false, last: 0, retryAt: 0, firstAt: 0, skipFail: 0 };
+    if (D.gen !== st.gen) {
+      clearTimeout(judgeTimer);
+      st = { gen: D.gen, passes: 0, blocked: false, last: 0, retryAt: 0, firstAt: 0, skipFail: 0, hitAt: 0 };
+    }
 
     const now = Date.now();
     if (!st.firstAt) st.firstAt = now;
@@ -660,10 +713,14 @@
 
     // 判定窗口按"时间"而不是"次数"：loadedmetadata / playing / emptied / 2 秒看门狗
     // 都会触发判定，按次数上限会在 2~3 秒内被耗光，导致播放中段才出现的推广浮层永远没机会被看到。
-    // 暂停态下没有媒体事件，只能靠看门狗每 6 秒补判，所以窗口放宽到 60 秒（画面不会变，扫描量可控）。
-    const win = video.paused ? 60000 : 12000;
-    const maxPasses = video.paused ? 20 : 12;
-    if (now - st.firstAt > win || st.passes >= maxPasses) return;
+    // 只按时间窗判定，不再限制次数：直播容器经常比 video 晚一两秒才插进来，
+    // 原来 12 次（约 4~10 秒）用完就停，正好卡在"容器还没出现"的缝里，
+    // 表现为时灵时不灵。
+    // 播放态原来只给 12 秒，超过后这条视频再也不查 —— 直播卡片有时要等播放器
+    // 初始化、切流完成后才挂上 feed-live 容器，超过 12 秒就彻底漏掉。
+    // 现在播放 / 暂停统一给 60 秒：前 12 秒高频（450/800ms），之后降到 2 秒一次。
+    const win = 60000;
+    if (now - st.firstAt > win) return;
     st.passes++;
 
     // 广告和直播是两个独立开关，谁开着就查谁
@@ -677,18 +734,25 @@
     if (!reason) {
       liveStreak = 0;                   // 回到正常视频，连续直播计数清零
       liveCooldownUntil = 0;
-      // 前几次用短间隔（商品卡/浮层常比视频晚一拍），之后每 1.2 秒复核，
-      // 直到 12 秒窗口结束。旧的 0.9/3 秒节奏会让"广告已经出现一两秒才被判到"。
-      if (Date.now() - st.firstAt < 12000) setTimeout(() => judge(video), st.passes <= 3 ? 500 : 1200);
+      // 命中后如果最终没切走（容器消失 / 误判），blocked 会一直锁到换片，
+      // 这条视频之后就再也不会被检查。给一个 3 秒的释放窗口。
+      if (st.blocked && Date.now() - (st.hitAt || 0) > 3000) st.blocked = false;
+      // 前几次用短间隔（商品卡 / 直播容器常比视频晚一拍），之后每 0.8 秒复核，
+      // 12 秒后降到 2 秒一次，直到 60 秒窗口结束。单次扫描只有几毫秒。
+      const age = Date.now() - st.firstAt;
+      clearTimeout(judgeTimer);
+      judgeTimer = setTimeout(() => judge(video), age < 12000 ? (st.passes <= 3 ? 450 : 800) : 2000);
       return;
     }
 
     if (st.blocked) return;
     st.blocked = true;
+    st.hitAt = Date.now();
     D.log('filter: 识别到', reason, '，跳过该视频');
 
-    // 连续直播过多时进入 20 秒冷却，期间既不跳也不重判；
-    // 旧版把 streak 归零后仍继续判下一条，表现为"每 5 条直播必漏 1 条"。
+    // 连续直播过多时短暂冷却，避免推荐流整屏都是直播时无限快速切条。
+    // 冷却从 20 秒压到 10 秒：原来只要连着遇到 5 条直播就会停 20 秒，
+    // 用户体感就是"直播忽然不跳了"。
     if (reason.indexOf('直播') !== -1) {
       if (Date.now() < liveCooldownUntil) {
         D.log('filter: 直播冷却中，暂不跳');
@@ -697,8 +761,8 @@
       liveStreak++;
       if (liveStreak >= MAX_LIVE_STREAK) {
         liveStreak = 0;
-        liveCooldownUntil = Date.now() + 20000;
-        D.log('filter: 连续直播过多，暂停 20 秒');
+        liveCooldownUntil = Date.now() + 10000;
+        D.log('filter: 连续直播过多，暂停 10 秒');
         return;
       }
     } else {
@@ -707,9 +771,13 @@
     }
 
     // 命中时视频可能正处于暂停（失焦自动暂停 / 用户手动暂停 / 抖音暂停层）。
-    // 强信号（购物卡、官方广告标、电商浮层、推广按钮、店铺账号）直接切，
+    // 强信号（购物卡、官方广告标、电商浮层、推广按钮）直接切，
     // 否则广告会一直钉在暂停画面上；弱信号先登记，等恢复播放后重判再切。
-    const strong = STRONG_HIT_RE.test(reason);
+    //
+    // 直播也算强信号：直播卡片的 <video> 在拉流 / 初始化阶段经常就是 paused，
+    // 自动播放被浏览器策略拦住、失焦暂停也会让它一直停着，
+    // 等"恢复播放再跳"往往永远等不到 —— 表现就是直播停在那儿不跳。
+    const strong = STRONG_HIT_RE.test(reason) || reason.indexOf('直播') !== -1;
     if (video.paused && !strong) {
       pendingSkip = { gen: D.gen, reason, at: Date.now(), video };
       D.log('filter: 弱信号命中但视频暂停，登记待跳', reason);
@@ -859,7 +927,7 @@
       judge(video);
     },
     // 手动标记后需要立刻把当前这条切走：重置判定窗口再判一次，
-    // 否则这条视频的 12 秒窗口可能已经用满，judge 会直接 return。
+    // 否则这条视频的 60 秒窗口可能已经用满，judge 会直接 return。
     forceCheck(video) {
       st.blocked = false;
       st.passes = 0;
@@ -891,12 +959,15 @@
       };
     },
     reset() {
-      st = { gen: -1, passes: 0, blocked: false, last: 0, retryAt: 0, firstAt: 0, skipFail: 0 };
+      clearTimeout(judgeTimer);
+      st = { gen: -1, passes: 0, blocked: false, last: 0, retryAt: 0, firstAt: 0, skipFail: 0, hitAt: 0 };
       lastSkip = 0;
       lastScan = 0;
       liveStreak = 0;
       liveCooldownUntil = 0;
       pendingSkip = null;
+      pendingBack = null;
+      userBack = null;
     }
   };
 })();
