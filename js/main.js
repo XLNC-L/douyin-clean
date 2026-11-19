@@ -382,10 +382,10 @@
     // 路由兜底：抖音的搜索框回车、部分站内跳转走的是 history.pushState，
     // 既没有 popstate 也没有 click，onRoute 会漏掉，结果"进了搜索页还在按首页的能力跑"
     // （表现为该页浮层 / 进度线不生效，或者反过来把搜索页当信息流去切条）。
-    // 每 2 秒比一次 href 只是字符串比较，开销可以忽略。
+    // 每轮比一次 href 只是字符串比较，开销可以忽略。
     if (location.href !== href) onRoute();
     // 聊天页 / 弹层视频还在播时，背后的信息流要保持暂停：
-    // 抖音的自动播放会在切回页面时把推荐视频重新拉起来，这里每 2 秒复核一次。
+    // 抖音的自动播放会在切回页面时把推荐视频重新拉起来，这里每轮复核一次。
     if (overlayVideo) {
       if (!overlayVideo.isConnected || overlayVideo.paused || overlayVideo.ended) overlayVideo = null;
       else pauseFeedFor(overlayVideo);
@@ -416,7 +416,7 @@
     // 命中广告时视频可能处于暂停：恢复播放后由这里补跳（见 filter.js 的 pendingSkip）
     if (D.filter && D.filter.retryPending) D.filter.retryPending();
     D.filter.closePopups(v);        // 顺手关掉头像旁的直播/推广小窗
-  }, 2000);
+  }, 1000);
 
   // ---------- 失焦自动暂停（不自动恢复） ----------
   // 搜索页（含推荐页搜索的 /root/search）以前整页没有播放器能力，

@@ -210,6 +210,17 @@
     if (e.key === 'ArrowUp' || e.key === 'PageUp') onManualBack();
   }, true);
 
+  // 「用户刚动过手」的标记：命中后是三段式切条（点箭头 -> 复核 -> 追加滚动），
+  // 中间有几次 500ms 的排队复核。用户如果在这个空档自己滑了一下，
+  // 排队的复核还会继续执行，观感就是"我手动操作了，它又自己跳"。
+  // 所以只要检测到真实手势，就让排队中的切条放弃。
+  let lastUserAct = 0;
+  const noteUserAct = () => { lastUserAct = Date.now(); };
+  window.addEventListener('wheel', noteUserAct, { capture: true, passive: true });
+  window.addEventListener('keydown', noteUserAct, true);
+  window.addEventListener('touchstart', noteUserAct, { capture: true, passive: true });
+  window.addEventListener('pointerdown', noteUserAct, true);
+
   function cardOf(video) {
     return video.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"], .slider-video') ||
       video.parentElement || document.body;
@@ -533,9 +544,9 @@
   // 于是一条"点不动"的视频会一直播到用户手动划走，所有后续判定都被 blocked 挡掉。
   // 第三层也不再发合成 KeyboardEvent：isTrusted=false，抖音的事件委托不接受，等于没有兜底。
   const SWITCH_TRIES = 3;
-  const SWITCH_RECHECK = 800;        // 每次尝试后多久复核（抖音换片通常在几百毫秒内完成）
-  const SWITCH_MIN_GAP = 900;        // 两次切条之间的最小间隔
-  const SWITCH_RETRY_DELAY = 3000;   // 三次都失败后隔多久重新判定
+  const SWITCH_RECHECK = 500;        // 每次尝试后多久复核（抖音换片通常在几百毫秒内完成）
+  const SWITCH_MIN_GAP = 600;        // 两次切条之间的最小间隔
+  const SWITCH_RETRY_DELAY = 2000;   // 三次都失败后隔多久重新判定
 
   // 找承载信息流的可滚动容器（抖音是 scroll-snap，滚一屏会吸附到下一条）
   function scrollTarget(video) {
@@ -637,6 +648,11 @@
       setTimeout(() => {
         if (!video || !video.isConnected || document.hidden) return;
         if (D.gen !== genAt) return;              // 代次变了 = 真的切走了
+        // 用户在这段排队空档里自己动过手：收手，别再追加滚动
+        if (Date.now() - lastUserAct < 900) {
+          D.log('filter: 用户手动操作，放弃本次切条');
+          return;
+        }
         // 换片动画进行中代次可能还没更新，但旧视频已经滚出视口 → 也认为切走了，
         // 否则会在动画中途再滚一屏，一次跳过两条。
         if (D.visibleArea(video) < 10000) return;
@@ -708,7 +724,7 @@
     const now = Date.now();
     if (!st.firstAt) st.firstAt = now;
     if (now < st.retryAt) return;       // 上一轮三次都没切走，等冷却结束再判
-    if (now - st.last < 350) return;    // 同一视频短时间内别重复扫
+    if (now - st.last < 200) return;    // 同一视频短时间内别重复扫
     st.last = now;
 
     // 判定窗口按"时间"而不是"次数"：loadedmetadata / playing / emptied / 2 秒看门狗
@@ -737,11 +753,11 @@
       // 命中后如果最终没切走（容器消失 / 误判），blocked 会一直锁到换片，
       // 这条视频之后就再也不会被检查。给一个 3 秒的释放窗口。
       if (st.blocked && Date.now() - (st.hitAt || 0) > 3000) st.blocked = false;
-      // 前几次用短间隔（商品卡 / 直播容器常比视频晚一拍），之后每 0.8 秒复核，
-      // 12 秒后降到 2 秒一次，直到 60 秒窗口结束。单次扫描只有几毫秒。
+      // 前几次用短间隔（商品卡 / 直播容器常比视频晚一拍），之后每 0.5 秒复核，
+      // 12 秒后降到 1 秒一次，直到 60 秒窗口结束。单次扫描只有几毫秒。
       const age = Date.now() - st.firstAt;
       clearTimeout(judgeTimer);
-      judgeTimer = setTimeout(() => judge(video), age < 12000 ? (st.passes <= 3 ? 450 : 800) : 2000);
+      judgeTimer = setTimeout(() => judge(video), age < 12000 ? (st.passes <= 3 ? 250 : 500) : 1000);
       return;
     }
 
