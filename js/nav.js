@@ -114,7 +114,14 @@
       const label = labelOf(el);
       if (!label || seen.has(label)) continue;
       seen.add(label);
-      out.push({ label, el, wrap, row: rowOf(wrap, nav) });
+      const cls = typeof wrap.className === 'string' ? wrap.className : '';
+      // 页脚（备案 / 广告投放 / 用户协议 …）也全是 <a>，会被下面的兜底推导误当成导航项。
+      // 真导航入口一定带 tab-* 语义类，据此区分，面板才不会被二十多条页脚链接淹没。
+      out.push({
+        label, el, wrap, row: rowOf(wrap, nav),
+        footer: !!el.closest('footer'),
+        viaTab: TAB_RE.test(cls)
+      });
     }
     return out;
   }
@@ -189,6 +196,59 @@
     return hid;
   }
 
+  // 侧栏底部的工具条（设置 / 反馈 / 下载 / 客服 等 4 个纯图标按钮）。
+  // 真机结构：一个 div 里并排 4 个「只含 svg、没有文字」的 32×32 子项，最左边是设置。
+  // 它们不是链接，没有 tab-* 包裹，所以 rows() 扫不到；这里按 DOM 结构定位，
+  // 不依赖 rect —— 整条隐藏（display:none）时规格尺寸全为 0，仍然能找出来。
+  function bottomBar(nav) {
+    let best = null;
+    let n = 0;
+    for (const el of nav.querySelectorAll('div')) {
+      if (++n > 3000) break;
+      let same = 0;
+      for (const child of el.children) {
+        if (child.tagName !== 'DIV') continue;
+        if (!child.querySelector('svg')) continue;
+        if (String(child.textContent || '').trim()) continue;
+        same++;
+      }
+      if (same >= 3) best = el;
+    }
+    return best;
+  }
+
+  // 「设置」这一项在自定义保留里的落点：保留时把它所在的工具条一起保住，
+  // 不保留时只藏按钮本身（其余三个跟随，视觉上整条一起消失）。
+  function applySettingsBtn(nav, keep) {
+    const bar = bottomBar(nav);
+    if (!bar) return;
+    const btn = bar.firstElementChild;
+    if (!btn) return;
+    if (!keepMatch('设置', keep)) {
+      btn.setAttribute(HIDE_ATTR, '');
+      return;
+    }
+    // 从按钮往上一直清到"再往上就是导航主体"为止。
+    // 实测工具条外面还套了 WYX6tGGi / AgPyOphm / pace-island 三层，
+    // 固定层数会漏（第一版只清 3 层，pace-island 上的标记没清掉，按钮仍然不可见）。
+    let node = btn;
+    for (let i = 0; i < 8 && node && node !== nav; i++, node = node.parentElement) {
+      node.removeAttribute(HIDE_ATTR);
+      const p = node.parentElement;
+      if (!p || p === nav) break;
+      if (p.querySelectorAll(LINK_SEL).length > 1) break;
+    }
+    // 工具条和备案号（京ICP 备…）共用一个外层容器，上面把外层标记清掉后
+    // 备案号会跟着露出来，这里把它重新收掉，只留工具条。
+    const host = bar.parentElement;
+    if (host && host !== nav) {
+      for (const sib of host.children) {
+        if (sib === bar || sib.contains(bar) || bar.contains(sib)) continue;
+        sib.setAttribute(HIDE_ATTR, '');
+      }
+    }
+  }
+
   function hideItems() {
     const nav = navOf();
     if (!nav || D.settings.nav.mode !== 'custom' || fullHidden()) return;
@@ -200,9 +260,10 @@
     // rows() 认不出结构时（直播站 live.douyin.com 的导航层级不同）退回"按文案直配"：
     // 直接遍历链接，按可读文案判断保留/隐藏，不再依赖 tab-* 包裹层与行容器推导。
     if (!list.length) {
-      if (!keep.size) { hideByText(nav, keep); return; }
+      if (!keep.size) { hideByText(nav, keep); applySettingsBtn(nav, keep); return; }
       const hit = hideByText(nav, keep);
       if (hit) D.log('nav: 退回文案匹配隐藏', hit, '项');
+      applySettingsBtn(nav, keep);
       return;
     }
 
@@ -216,6 +277,7 @@
         if (it.row !== first.row) it.row.setAttribute(HIDE_ATTR, '');
       }
       D.log('nav: 保留项缺失，保底保留第一项并隐藏其余');
+      applySettingsBtn(nav, keep);
       return;
     }
 
@@ -257,6 +319,7 @@
       sib.setAttribute(HIDE_ATTR, '');
     }
 
+    applySettingsBtn(nav, keep);
     D.log('nav: 逐项保留', Array.from(keep).join('/'), '，其余入口与侧栏内容已隐藏');
   }
 
@@ -300,6 +363,18 @@
       // 不再要求 html.dyc-feed —— 只在刷视频页面生效会表现为"换个页面侧栏又出来了"。
       const hidden = fullHidden();
       const drawer = D.settings.nav.mode === 'drawer';
+      // 覆盖式抽屉依赖侧栏的原始位置 / 宽度 / 背景色，必须在加 class（侧栏变 fixed）
+      // 之前量。量到的值写进 CSS 变量，页面重建侧栏后重新量一次即可自愈。
+      if (drawer && nav) {
+        const r = nav.getBoundingClientRect();
+        const cs = getComputedStyle(nav);
+        const root = document.documentElement;
+        if (r.width > 60) root.style.setProperty('--dyc-nav-w', Math.round(r.width) + 'px');
+        if (r.top > 0) root.style.setProperty('--dyc-nav-top', Math.round(r.top) + 'px');
+        if (cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)') {
+          root.style.setProperty('--dyc-nav-bg', cs.backgroundColor);
+        }
+      }
       document.documentElement.classList.toggle('dyc-nav-hidden', hidden);
       document.documentElement.classList.toggle('dyc-nav-drawer', drawer);
       ensureZone(drawer);
@@ -333,7 +408,17 @@
     },
 
     labels() {
-      return rows().map(it => it.label).filter(l => !isForced(l));
+      // 只列真正的导航入口：优先取带 tab-* 包裹的项；直播站没有 tab-*，
+      // 这时退回"排除 footer"的完整列表。底部工具条的「设置」单独补在最后。
+      const all = rows().filter(it => !it.footer);
+      const tabs = all.filter(it => it.viaTab);
+      const list = tabs.length ? tabs : all;
+      const out = list.map(it => it.label).filter(l => !isForced(l));
+      // 底部工具条最左边是「设置」，它不是链接、没有 tab-* 包裹，
+      // 单独补进候选列表，用户才能在自定义保留里勾选它。
+      const nav = navOf();
+      if (nav && bottomBar(nav)) out.push('设置');
+      return out;
     },
 
     // 页面重建侧边栏（切换侧边导航、SPA 重渲染）后，旧的 MutationObserver 会失效、
@@ -360,6 +445,10 @@
       ensureZone(false);
       document.documentElement.classList.remove('dyc-nav-hidden');
       document.documentElement.classList.remove('dyc-nav-drawer');
+      const root = document.documentElement;
+      root.style.removeProperty('--dyc-nav-top');
+      root.style.removeProperty('--dyc-nav-w');
+      root.style.removeProperty('--dyc-nav-bg');
     }
   };
 })();

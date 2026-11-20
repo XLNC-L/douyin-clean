@@ -15,21 +15,41 @@ html.dyc-nav-hidden #douyin-navigation {
   display: none !important;
 }
 
-/* 抽屉模式：侧栏整条收进左侧之外，只在左边缘留一条 12px 热区；
-   鼠标移到热区或侧栏上时滑出，移开自动缩回。 */
+/* 抽屉模式：侧栏整条收起到左侧之外，只在左边缘留一条 12px 热区；
+   鼠标移到热区或侧栏上时滑出，移开自动缩回。
+   覆盖式：用 fixed 脱离文档流，主内容宽度不变 —— 侧栏滑出时视频不会跟着缩窄/重排，
+   只盖在画面上层。位置和宽度由 nav.js 写入 CSS 变量（--dyc-nav-top / -w / -bg）。 */
 html.dyc-nav-drawer #douyin-navigation {
-  /* 收起：用负外边距把整条侧栏推出视口左侧。
-     不用 transform —— 抖音会给侧栏写内联 transform 做折叠动画，覆盖不掉；
-     也不用 position:fixed —— 它的宽度依赖原 flex 布局，脱离文档流后会塌成 0。
-     负 margin 两者都避开：宽高保持原样，内容区自动左移填补，不留白边。 */
-  margin-left: -180px !important;
+  position: fixed !important;
+  left: 0 !important;
+  top: var(--dyc-nav-top, 60px) !important;
+  bottom: auto !important;
+  /* 抖音给侧栏写了 height:100vh，fixed 后从 top 算起就会超出视口 60px，
+     底部（下载卡片 / 备案）看不见、也滚不到。这里改成"视口高 - top"，
+     内部内容超出时由 overflow 滚动补齐。 */
+  height: calc(100vh - var(--dyc-nav-top, 60px)) !important;
+  box-sizing: border-box !important;
+  width: var(--dyc-nav-w, 180px) !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  /* 只压住页面内容（实测播放器 z-index 为 11），不能用 2147482800 ——
+     那样会把抖音自己的设置面板 / 弹窗一起盖住，表现为"抽屉打开后设置项点不到"。 */
+  z-index: 100 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  /* 底部按钮（设置 / 反馈 …）原来紧贴视口下沿，只剩 6px，
+     窗口未最大化或任务栏自动隐藏时会被压住点不到。这里留出呼吸空间。 */
+  padding-bottom: 14px !important;
+  background: var(--dyc-nav-bg, #161823);
+  box-shadow: 2px 0 16px rgba(0, 0, 0, .45);
+  transform: translateX(-100%);
   opacity: 0;
   visibility: hidden;
-  transition: margin-left .2s cubic-bezier(.4, 0, .2, 1), opacity .2s ease, visibility .2s;
+  transition: transform .24s cubic-bezier(.4, 0, .2, 1), opacity .22s ease, visibility .24s;
 }
 html.dyc-nav-drawer #douyin-navigation:hover,
 html.dyc-nav-drawer:has(.dyc-nav-zone:hover) #douyin-navigation {
-  margin-left: 0 !important;
+  transform: translateX(0);
   opacity: 1;
   visibility: visible;
 }
@@ -39,7 +59,7 @@ html.dyc-nav-drawer .dyc-nav-zone {
   top: 0;
   bottom: 0;
   width: 12px;
-  z-index: 2147482999;
+  z-index: 99;
   background: transparent;
 }
 
@@ -120,6 +140,21 @@ html.dyc-player:not(.dyc-ui-on) [class*="recommend-tag"] {
   display: none !important;
 }
 
+/* 左下角「游戏 XX · 评分高达 9.1」推广卡：独立开关（hideGame），
+ * 不参与浮层显隐 —— 即使关掉「浮层自动隐藏」，这张卡也照常隐藏。 */
+[data-dyc-game] {
+  display: none !important;
+}
+
+/* 头像旁 / 右侧的直播预览小窗（实测 166×296）：只闪几秒又出现，直接隐藏。
+ * 只由 JS 打到小尺寸 [data-e2e="feed-live"] 容器上，全屏直播不走这里。
+ * 用 opacity 而不是 display:none —— 抖音会复用这个容器放大成全屏直播间，
+ * 保留布局才能继续量到尺寸，一旦变大立刻恢复显示。 */
+[data-dyc-mini-hide] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 /* ========== 4. 清晰度弹层：脚本切换档位时临时展开 ========== */
 /* 抖音的档位列表只在真实鼠标悬停时才显示，合成事件打不开。
  * 因此脚本先给组件加 .dyc-open：整条链强制 display/visibility/pointer-events，
@@ -181,6 +216,13 @@ html.dyc-player.dyc-ui-on .dyc-progress {
   opacity: 0 !important;
 }
 
+/* 「控制条」开关打开后，原生控制条（含它自带的进度）被整条隐藏，
+ * 此时自绘进度线不再有重复问题：无论浮层开没开（dyc-ui-on 是否常驻），
+ * 都要常显在画面底部，否则关掉浮层后底部就完全没有进度指示了。 */
+html.dyc-player.dyc-progress-on.dyc-h-controls .dyc-progress {
+  opacity: 1 !important;
+}
+
 /* 直播 / MSE 流拿不到 duration：整条隐藏，而不是一直停在 0 */
 html.dyc-player.dyc-progress-on .dyc-progress[data-dyc-unknown] {
   display: none;
@@ -195,5 +237,222 @@ html.dyc-player.dyc-progress-on .dyc-progress[data-dyc-unknown] {
  * 保留画面、主播信息条、聊天区与播放器控制。用 display:none 让布局真正塌陷。 */
 html.dyc-live [data-dyc-live-hide] {
   display: none !important;
+}
+
+/* ========== 8. 推荐视频页 · 页面元素开关 ========== */
+/* 全部由 popup 的「页面元素」控制：html 上挂 dyc-h-<key> 时才隐藏。
+ * 只做视觉隐藏（display:none），不删除节点、不拦截事件，
+ * 因此播放、切条、评论、点赞等实际功能不受影响；关掉开关立即恢复。 */
+
+/* 顶栏整条：实测主顶栏是页面里唯一的 header */
+html.dyc-h-topbar header {
+  display: none !important;
+}
+
+/* 隐藏顶栏只隐藏 header，不再上移 / 撑高播放器。
+ * 之前用 top:-56 + height:100vh 想把顶栏占掉的 56px 视觉上补回来，
+ * 但播放卡片（video_xxx sliderVideo）自带 overflow:hidden，且整条路由从 y=56 开始，
+ * 上移的 56px 与拉高的 67px 都被裁掉 —— 视频按容器重新 contain/放大，
+ * 表现为"画面变大、上下内容显示不全"。保持原生位置与高度最稳：画面完整，
+ * 顶栏位置留一条背景色，不再出现裁切。 */
+/* 横向铺满只跟随「整条隐藏 / 抽屉」：这两种模式把左侧导航整个拿掉了，
+ * 抖音不会自己重算，必须接管宽度；同时松手后箭头仍独立于互动栏。
+ * 右侧固定留出 68px（--dyc-arrow-gap）给抖音原生的上下切换箭头：
+ * 拉到满 100vw 会把互动栏推到视口最右缘，和箭头完全重叠（实测两者都在
+ * 1996~2032）。留出这 68px 后，画面仍比原生宽 160px，箭头保持原生的画面外位置。 */
+html.dyc-nav-hidden:not(.dyc-cm) .slider-video,
+html.dyc-nav-drawer:not(.dyc-cm) .slider-video {
+  width: calc(100vw - var(--dyc-arrow-gap, 68px)) !important;
+  max-width: none !important;
+}
+/* 抖音的 swiper 用的是"每屏宽 = 视口 - 导航宽"的固定计算，
+ * 隐藏导航后它不会重算，画面就停在 x=160。这里把实测偏移量写成变量，
+ * 让播放器左移同样的距离，效果等同于刷新后的布局。 */
+html.dyc-nav-hidden:not(.dyc-cm) .slider-video,
+html.dyc-nav-drawer:not(.dyc-cm) .slider-video {
+  left: calc(-1 * var(--dyc-sx, 0px)) !important;
+}
+/* 自定义保留 / 保持原样：保持抖音原生宽度（「视口 - 导航 - 68」），
+ * 不再向右补满。补满会把右侧互动栏推到视口最右缘，正好压住抖音原生的
+ * 上下切换箭头（实测补满后互动栏 1982~2032、箭头 1996~2032）。
+ * 原生宽度下互动栏在 1914~1964，箭头独立显示在画面外，与官方一致。 */
+/* 评论面板打开时（html.dyc-cm）临时取消铺满：铺满状态下抖音会按 100vw 的播放器
+ * 右缘定位面板，面板整个落到视口外（表现为"打不开评论"）。取消铺满后回到原生
+ * 1980 宽，抖音自己会把视频缩到面板左侧（实测 1414 + 面板 566），不干预最稳。 */
+
+
+/* 评论区打开时，播放器必须整体缩到面板左侧，否则画面被面板压住。
+ * <video> 常被抖音写成 100vw 的内联宽度，只夹容器不够，这里一并夹住；
+ * 互动栏是 absolute right:0 挂在 basePlayerContainer 上，
+ * base 缩窄后它会自动跟到视频右缘。 */
+html.dyc-cm [class*="basePlayerContainer"] {
+  width: 100% !important;
+  max-width: 100% !important;
+  left: auto !important;
+}
+html.dyc-cm video {
+  max-width: 100% !important;
+}
+html.dyc-nav-hidden:not(.dyc-cm) .xgplayer,
+html.dyc-nav-hidden:not(.dyc-cm) .xg-video-container,
+html.dyc-nav-drawer:not(.dyc-cm) .xgplayer,
+html.dyc-nav-drawer:not(.dyc-cm) .xg-video-container {
+  width: calc(100vw - var(--dyc-arrow-gap, 68px)) !important;
+  max-width: none !important;
+}
+html.dyc-nav-hidden:not(.dyc-cm) [class*="dySwiperSlide"],
+html.dyc-nav-drawer:not(.dyc-cm) [class*="dySwiperSlide"] {
+  width: calc(100vw - var(--dyc-arrow-gap, 68px)) !important;
+  max-width: none !important;
+  overflow: visible !important;
+}
+/* 播放器默认带圆角，铺满后四角会露出页面底色（浅色主题下是白角） */
+html.dyc-nav-hidden .slider-video,
+html.dyc-nav-hidden .xgplayer,
+html.dyc-nav-hidden .xg-video-container,
+html.dyc-nav-hidden [class*="dySwiperSlide"],
+html.dyc-nav-drawer .slider-video,
+html.dyc-nav-drawer .xgplayer,
+html.dyc-nav-drawer .xg-video-container,
+html.dyc-nav-drawer [class*="dySwiperSlide"] {
+  border-radius: 0 !important;
+}
+
+/* 上下切换箭头不做任何位置接管：保持抖音原生位置、原生显隐与结构，
+ * 面板里只提供「切换箭头」隐藏开关（见下方 dyc-h-arrows 规则）。 */
+
+/* 顶栏搜索框：隐藏但保留占位（opacity 而不是 display:none）。
+ * 用 display:none 会让顶栏塌成一条细线，压缩整个头部的间距；
+ * 保留盒子高度、只把内容透明化并禁用点击，视觉上等于消失。
+ * 勾「顶栏」时整条 header 消失，这个开关同时变灰（popup 里联动）。 */
+html.dyc-h-search [data-e2e="searchbar-input"],
+html.dyc-h-search [data-e2e="searchbar-button"],
+html.dyc-h-search [data-dyc-wrap="search"] {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 左下作者：头像 / 昵称 / 时间 / 关注 */
+html.dyc-h-author .account {
+  display: none !important;
+}
+
+/* 左下标题与话题，以及「作者声明」那一行 */
+html.dyc-h-desc [data-e2e="video-desc"],
+html.dyc-h-desc .d4U78Bp2 {
+  display: none !important;
+}
+
+/* 左下商品 / 购物卡（不同版本类名不同，按 data-e2e 与常见类名兜底） */
+html.dyc-h-product [data-e2e*="product" i],
+html.dyc-h-product [data-e2e*="shop" i],
+html.dyc-h-product [data-e2e*="goods" i],
+html.dyc-h-product [class*="product-card" i],
+html.dyc-h-product [class*="shop-card" i] {
+  display: none !important;
+}
+
+/* 右侧互动栏逐项开关。实测每条按钮外面还包了一层不带 class 的 div，
+ * 那才是 flex column 的真实子项；只隐藏里面的 data-e2e 元素，外层仍占位，
+ * 下面的项就不会上移。所以这里用 :has(> …) 精确命中"直接父级"，
+ * 隐藏后 flex 会自动把其余项排上来，中间不留空。 */
+/* 互动栏单项隐藏：全部由 JS 打 [data-dyc-rail-hide] 标记。
+ * 不能再按「含某个按钮的 div」上溯 —— 收藏、更多、听抖音在部分版本里
+ * 直接挂在整条互动栏下面，上溯会把右边全部藏掉。 */
+[data-dyc-rail-hide] {
+  display: none !important;
+}
+
+/* 兜底：万一某版结构没有外层包装，直接隐藏元素本身。
+ * 「更多」和「听抖音」就挂在互动栏同一层，所以只能隐藏自身，
+ * 用 :has 上溯会命中整条互动栏，把右边全部藏掉。 */
+html.dyc-h-digg [data-e2e="video-player-digg"],
+html.dyc-h-comment [data-e2e="feed-comment-icon"],
+html.dyc-h-collect [data-e2e="video-player-collect"],
+html.dyc-h-share [data-e2e="video-player-share"],
+html.dyc-h-more [data-e2e="video-play-more"],
+html.dyc-h-music [data-dyc-wrap="music"],
+html.dyc-h-avatar .slider-video :not([data-e2e*="comment"]) [data-e2e*="avatar"],
+html.dyc-h-avatar .slider-video :not([data-e2e*="comment"]) [data-e2e*="follow"] {
+  display: none !important;
+}
+
+/* 「共 N 人推荐」 */
+html.dyc-h-recommend [class*="recommend-tag"] {
+  display: none !important;
+}
+
+/* 底部播放控制条（含倍速 / 清屏 / 清晰度 / 音量 / 全屏） */
+html.dyc-h-controls .xgplayer-controls,
+html.dyc-h-controls .douyin-player-controls,
+html.dyc-h-controls .xg-inner-controls {
+  display: none !important;
+}
+
+/* 播放器原生进度条 */
+html.dyc-h-progress .xgplayer-progress,
+html.dyc-h-progress [class*="xgplayer-progress"],
+html.dyc-h-progress [class*="mini-progress"] {
+  display: none !important;
+}
+
+/* 左右切换箭头：外层那个带边框 / 圆角的空框由 JS 打标记一起隐藏，
+ * 只藏箭头本身会留下一个方框（实测 x≈1996 处 36×40 的箭头包在更大的圆角容器里）。 */
+html.dyc-h-arrows [data-e2e^="video-switch-"],
+html.dyc-h-arrows [data-dyc-wrap="arrows"] {
+  display: none !important;
+}
+
+/* 评论入口：隐藏右侧评论按钮（入口）。已打开的评论面板与底部输入框不动 ——
+ * 评论功能本身不受影响，仍可正常查看与发表评论。 */
+html.dyc-h-comment [data-e2e="feed-comment-icon"] {
+  display: none !important;
+}
+
+/* 关闭控制条后，把文案/作者与右侧互动栏一起下沉 48px（原控制条高度），
+ * 填上腾出来的底部空间。不改播放器高度 —— 之前用 height:100% 补齐会把
+ * 卡片一路撑到 927（视口 938，卡片从 56 起 → 底边 983 已超出视口 45px），
+ * 文案与最后一行话题会被挤出屏幕。 */
+html.dyc-h-controls .player-position-box-bottom {
+  top: auto !important;
+  bottom: 0 !important;
+}
+
+/* 注意：这里不能用 object-fit: cover —— 竖屏视频会被裁成横屏、主体被切掉。
+ * 容器撑满即可，画面按原比例居中，多余部分留黑（与抖音原生一致）。 */
+
+/* 文案下方的 AI 按钮：文案会随视频变化（识别画面 / AI 总结 …），
+ * 没有稳定的 data-e2e，只能由 JS 按几何位置打 data-dyc-ai-hide，
+ * 这里统一隐藏；取消勾选时 JS 摘掉标记即可恢复。 */
+html.dyc-h-ai [data-dyc-ai-hide] {
+  display: none !important;
+}
+
+/* 评论区顶部：AI / TA的作品 / 评论 / 合集 / 相关推荐 / 热点 / 大家都在搜
+ * 七个元素各自独立开关（右上角关闭按钮始终保留）。
+ * tab 的文案与顺序会变（AI 那个只有图标），所以由 JS 按文案打 data-dyc-cm-tab。 */
+html.dyc-h-cmsearch [class*="comment-header-with"] {
+  display: none !important;
+}
+html.dyc-h-cmai [data-dyc-cm-tab="cmai"],
+html.dyc-h-cmworks [data-dyc-cm-tab="cmworks"],
+html.dyc-h-cmcomment [data-dyc-cm-tab="cmcomment"],
+html.dyc-h-cmmix [data-dyc-cm-tab="cmmix"],
+html.dyc-h-cmrec [data-dyc-cm-tab="cmrec"],
+html.dyc-h-cmhot [data-dyc-cm-tab="cmhot"] {
+  display: none !important;
+}
+/* 只有七项全部隐藏时才把整条顶部容器摘出文档流：评论列表随之上移贴顶，
+ * 关闭按钮浮在面板右上角原位（右 8px、顶 12px，按实测缝隙补偿）。 */
+html.dyc-cm-allhidden div:has(> div > [role="tablist"]) {
+  position: absolute !important;
+  top: 12px !important;
+  right: 8px !important;
+  width: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  z-index: 20 !important;
 }
 

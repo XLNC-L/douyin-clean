@@ -25,8 +25,40 @@
   let lastPoster = '';
   let lastVid = '';
   let lastAdCheck = 0;
+  let wideX = -1;
+  let lastCmOpen = null;
 
   const srcOf = v => (v && (v.currentSrc || v.src)) || '';
+
+  // 上下切换箭头不做任何位置接管：保持抖音原生位置、原生显隐与结构，
+  // 面板里只提供「切换箭头」隐藏开关（CSS 直接 display:none）。
+
+  // 评论面板开合 -> dyc-cm。用独立定时器同步，不走看门狗：
+  // 看门狗开头有 document.hidden 跳过，页面在后台/切走一会儿再回来时
+  // class 会滞后，视频就被评论面板压着（用户看到"打开评论画面被遮挡"）。
+  // 只认真正的评论面板：宽度要够（实测约 566px）、高度足够、且横向落在视口内。
+  // 之前把 [class*="comment-mainContent"] 也算进来，关闭评论后该节点可能仍留在 DOM 里，
+  // 宽度不为 0 就会被一直判成"评论打开" —— 表现为关掉评论画面不恢复、浮层也唤不出来。
+  function commentPane() {
+    for (const el of document.querySelectorAll('[data-e2e="comment-list"]')) {
+      const r = el.getBoundingClientRect();
+      // 播放器加宽后，评论面板初次展开会被挤到视口右侧外（left ≥ 视口宽），
+      // 这里放宽到「视口右侧 600px 内」也算打开，才能及时加 dyc-cm 把播放器缩回去；
+      // 关掉后抖音会把面板宽度收到几十像素，自然不再命中。
+      if (r.width > 200 && r.height > 100 && r.right > 0 && r.left < innerWidth + 600) return r;
+    }
+    return null;
+  }
+
+  function syncCm() {
+    const open = !!commentPane();
+    if (open !== lastCmOpen) {
+      lastCmOpen = open;
+      html.classList.toggle('dyc-cm', open);
+    }
+  }
+
+  setInterval(syncCm, 200);
 
   // ---------- 聊天页 / 私信 / 好友分享弹层：暂停背后的推荐流 ----------
   // 需求：在聊天页点开视频时，背后的推荐视频必须停下来，
@@ -416,6 +448,41 @@
     // 命中广告时视频可能处于暂停：恢复播放后由这里补跳（见 filter.js 的 pendingSkip）
     if (D.filter && D.filter.retryPending) D.filter.retryPending();
     D.filter.closePopups(v);        // 顺手关掉头像旁的直播/推广小窗
+    // 刷新后第一条若是直播，光等媒体事件要 3 秒才出首判（实测）。
+    // 这里每秒主动催一次，命中就能立刻切走；judge 内部有 200ms 节流与 60 秒窗口。
+    // 评论区打开时让回抖音原生布局：它的面板按"视口 - 导航"算宽度，
+    // 播放器被拉到 100vw 后会把面板顶出屏幕右侧，关闭按钮点不到。
+    syncCm();
+    // 判定调用放在最后并单独兜底：它内部要做大量 DOM 查询，
+    // 一旦抛错会连带跳过下面的补标记逻辑。
+    if (v && D.filter && D.filter.checkAd) {
+      try { D.filter.checkAd(v); } catch (e) { /* 判定异常不影响其他同步 */ }
+    }
+    // 横向铺满的偏移量：swiper 按"视口 - 导航宽"算每屏宽度，隐藏导航后不重算，
+    // 画面会一直停在 x=160。这里把 slide 的实际左偏移写进 CSS 变量，由 left 抵消。
+    // 只在铺满规则生效的状态下算（箭头开关与布局无关）；评论区打开时播放器已交还
+    // 原生布局、slide 左偏移会被临时改成 0，此时跳过更新，避免把变量写成 0 后关不掉评论。
+    if (!html.classList.contains('dyc-cm') && (
+      html.classList.contains('dyc-nav-hidden') ||
+      html.classList.contains('dyc-nav-drawer')
+    )) {
+      const act = document.querySelector('[data-e2e="feed-active-video"]');
+      const slide = act && act.closest('[class*="dySwiperSlide"]');
+      const sx = slide ? Math.round(slide.getBoundingClientRect().left) : 0;
+      if (sx !== wideX) {
+        wideX = sx;
+        html.style.setProperty('--dyc-sx', sx + 'px');
+      }
+    }
+    // 搜索框 / 箭头这类"要藏外层容器"的项：抖音重渲染会换掉节点，标记跟着丢，
+    // 所以每轮补一次（只在相关开关打开时才查 DOM）
+    const uh = D.settings && D.settings.uiHide;
+    if (D.syncWraps && uh && (uh.search || uh.arrows || uh.music)) D.syncWraps();
+    if (D.syncCommentTop && uh &&
+      (uh.cmai || uh.cmworks || uh.cmcomment || uh.cmmix || uh.cmrec || uh.cmhot || uh.cmsearch)) {
+      D.syncCommentTop();
+    }
+    if (D.syncRailHeight && uh) D.syncRailHeight();
   }, 1000);
 
   // ---------- 失焦自动暂停（不自动恢复） ----------

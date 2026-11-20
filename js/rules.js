@@ -18,22 +18,28 @@
 
   const KEY = 'dycBlockRules';
   const MAX = 200;
-  let rules = { topics: [], authors: [] };
+  let rules = { topics: [], authors: [], keywords: [] };
 
   const norm = s => String(s || '').replace(/\s+/g, '').trim();
   const uniq = arr => Array.from(new Set(arr.filter(Boolean)));
+
+  // 统一解析存储内容：topics 是话题（配 # 前缀匹配），keywords 是文案关键词（子串匹配），
+  // authors 是作者 ID。旧版本只有 topics / authors，缺 keywords 时按空数组处理。
+  function parse(r) {
+    const str = v => (Array.isArray(v) ? v.filter(s => typeof s === 'string' && s).slice(0, MAX) : []);
+    return {
+      topics: str(r.topics),
+      authors: str(r.authors),
+      keywords: str(r.keywords)
+    };
+  }
 
   function load() {
     try {
       chrome.storage.local.get(KEY, obj => {
         const r = obj && obj[KEY];
         if (!r || typeof r !== 'object') return;
-        const topics = Array.isArray(r.topics) ? r.topics : [];
-        const authors = Array.isArray(r.authors) ? r.authors : [];
-        rules = {
-          topics: topics.filter(s => typeof s === 'string' && s).slice(0, MAX),
-          authors: authors.filter(s => typeof s === 'string' && s).slice(0, MAX)
-        };
+        rules = parse(r);
       });
     } catch (e) { /* 忽略 */ }
   }
@@ -82,11 +88,15 @@
   // 命中返回原因字符串（供 filter 当作强信号），否则空串
   function match(card) {
     if (!card) return '';
-    if (!rules.topics.length && !rules.authors.length) return '';
+    if (!rules.topics.length && !rules.authors.length && !rules.keywords.length) return '';
     const desc = descOf(card);
     const text = D.textOf(desc || card);
     for (const t of rules.topics) {
       if (t && text.indexOf('#' + t) >= 0) return '手动屏蔽(话题#' + t + ')';
+    }
+    // 文案关键词：出现在标题 / 描述 / 话题文本里就命中，不要求带 #
+    for (const k of rules.keywords) {
+      if (k && text.indexOf(k) >= 0) return '手动屏蔽(关键词:' + k + ')';
     }
     const author = authorOf(card);
     if (author && rules.authors.indexOf(author) >= 0) return '手动屏蔽(作者)';
@@ -156,11 +166,8 @@
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local' || !changes[KEY]) return;
       const r = changes[KEY].newValue;
-      if (!r || typeof r !== 'object') { rules = { topics: [], authors: [] }; return; }
-      rules = {
-        topics: Array.isArray(r.topics) ? r.topics.slice(0, MAX) : [],
-        authors: Array.isArray(r.authors) ? r.authors.slice(0, MAX) : []
-      };
+      if (!r || typeof r !== 'object') { rules = { topics: [], authors: [], keywords: [] }; return; }
+      rules = parse(r);
     });
   } catch (e) { /* 忽略 */ }
 

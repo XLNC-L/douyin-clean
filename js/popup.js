@@ -30,9 +30,15 @@
     toastTimer = setTimeout(() => { el.hidden = true; }, 1400);
   }
 
+  // 直播间精简的子项默认收起，点标题行的向下箭头展开；打开总开关时自动展开一次
+  let liveOpen = false;
+
   function render() {
     $$('input[data-key]').forEach(el => {
       el.checked = !!settings[el.dataset.key];
+    });
+    $$('input[data-ui]').forEach(el => {
+      el.checked = !!(settings.uiHide && settings.uiHide[el.dataset.ui]);
     });
     $$('input[name="navMode"]').forEach(el => {
       el.checked = el.value === settings.nav.mode;
@@ -42,11 +48,43 @@
     $('#qualityCap').value = settings.qualityCap || 'max';
     renderColor();
     $('#navCustom').hidden = settings.nav.mode !== 'custom';
-    $('#liveCustom').hidden = settings.liveClean === false;
+    $('#liveCustom').hidden = settings.liveClean === false || !liveOpen;
+    $('#liveToggle').setAttribute('aria-expanded', String(!$('#liveCustom').hidden));
     $('#headerCustom').hidden = settings.header.mode === 'off';
     renderNav();
     renderLive();
     renderHeader();
+    renderUiDeps();
+    syncAll();
+  }
+
+  // 顶栏整条隐藏后，「搜索框」开关没有意义：灰显并禁用，避免误以为还能单独控制。
+  function renderUiDeps() {
+    const uh = settings.uiHide || {};
+    const topbarHide = uh.topbar === true;
+    $$('input[data-ui="search"]').forEach(el => {
+      // 顶栏隐藏时统一显示为未勾选（顶栏本来就不在了），并禁用
+      if (topbarHide) el.checked = false;
+      el.disabled = topbarHide;
+      const chip = el.closest('.chip');
+      if (chip) chip.classList.toggle('is-disabled', topbarHide);
+    });
+  }
+
+  // 两个折叠分组（页面元素 / 评论区）各自的总开关：全选勾上、部分选中半选。
+  // 带 data-cm 的归「评论区」，其余归「页面元素」；被禁用的项（顶栏隐藏时的搜索框）不参与计数。
+  function syncAll() {
+    const boxes = $$('input[data-ui]');
+    const set = (sel, list) => {
+      const el = $(sel);
+      if (!el) return;
+      const usable = list.filter(b => !b.disabled);
+      const on = usable.filter(b => b.checked).length;
+      el.checked = usable.length > 0 && on === usable.length;
+      el.indeterminate = on > 0 && on < usable.length;
+    };
+    set('#uiAll', boxes.filter(b => !b.hasAttribute('data-cm')));
+    set('#cmAll', boxes.filter(b => b.hasAttribute('data-cm')));
   }
 
   function renderColor() {
@@ -210,18 +248,77 @@
   // 手动屏蔽规则库（存 local，不占 sync 配额）
   const RULE_KEY = 'dycBlockRules';
 
+  async function getRules() {
+    const res = await chrome.storage.local.get(RULE_KEY);
+    const r = res && res[RULE_KEY];
+    return {
+      topics: Array.isArray(r && r.topics) ? r.topics : [],
+      authors: Array.isArray(r && r.authors) ? r.authors : [],
+      keywords: Array.isArray(r && r.keywords) ? r.keywords : []
+    };
+  }
+
+  async function putRules(r) {
+    await chrome.storage.local.set({ [RULE_KEY]: r });
+  }
+
   async function refreshRules() {
     const el = $('#ruleDesc');
+    const list = $('#ruleList');
     if (!el) return;
     try {
-      const res = await chrome.storage.local.get(RULE_KEY);
-      const r = res && res[RULE_KEY];
-      const t = r && Array.isArray(r.topics) ? r.topics.length : 0;
-      const a = r && Array.isArray(r.authors) ? r.authors.length : 0;
-      el.textContent = (t || a) ? (t + ' 个话题 / ' + a + ' 个作者') : '暂无（刷视频时按 Alt+Shift+X 添加）';
+      const r = await getRules();
+      const n = r.topics.length + r.authors.length + r.keywords.length;
+      el.textContent = n
+        ? ('关键词 ' + r.keywords.length + ' / 话题 ' + r.topics.length + ' / 作者 ' + r.authors.length)
+        : '暂无规则';
+      if (!list) return;
+      list.textContent = '';
+      // 关键词按原样展示，话题加 #，作者加 @；每条后面带一个删除按钮
+      const addItem = (kind, value, label) => {
+        const item = document.createElement('span');
+        item.className = 'rule-item';
+        const text = document.createElement('span');
+        text.textContent = label;
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.title = '删除';
+        del.textContent = '×';
+        del.addEventListener('click', async () => {
+          const cur = await getRules();
+          cur[kind] = cur[kind].filter(v => v !== value);
+          await putRules(cur);
+          await refreshRules();
+        });
+        item.append(text, del);
+        list.append(item);
+      };
+      r.keywords.forEach(k => addItem('keywords', k, k));
+      r.topics.forEach(t => addItem('topics', t, '#' + t));
+      r.authors.forEach(a => addItem('authors', a, '@' + a));
     } catch (e) {
       el.textContent = '读取失败';
     }
+  }
+
+  // 输入以 # 开头按话题存（匹配时要求文案里出现同名话题），否则按文案关键词存（子串匹配）
+  async function addRule() {
+    const inp = $('#ruleInput');
+    if (!inp) return;
+    const raw = String(inp.value || '').trim();
+    if (!raw) return;
+    const r = await getRules();
+    if (raw.startsWith('#')) {
+      const t = raw.replace(/^#+/, '').replace(/\s+/g, '');
+      if (!t) { toast('请填写话题名称'); return; }
+      if (r.topics.indexOf(t) < 0) r.topics.push(t);
+    } else if (r.keywords.indexOf(raw) < 0) {
+      r.keywords.push(raw);
+    }
+    await putRules(r);
+    inp.value = '';
+    await refreshRules();
+    toast('已添加屏蔽规则');
   }
 
   function bind() {
@@ -229,7 +326,10 @@
       el.addEventListener('change', () => {
         settings[el.dataset.key] = el.checked;
         // 进度条 / 直播间精简的开关会带出 / 收起对应的设置块
-        if (el.dataset.key === 'progress' || el.dataset.key === 'liveClean') render();
+        if (el.dataset.key === 'progress' || el.dataset.key === 'liveClean') {
+          if (el.dataset.key === 'liveClean') liveOpen = el.checked;
+          render();
+        }
         save();
       });
     });
@@ -238,6 +338,58 @@
       settings.qualityCap = $('#qualityCap').value;
       save();
     });
+
+    // 页面元素：勾选 = 隐藏，取消 = 恢复显示
+    $$('input[data-ui]').forEach(el => {
+      el.addEventListener('change', () => {
+        settings.uiHide = settings.uiHide || {};
+        settings.uiHide[el.dataset.ui] = el.checked;
+        // 「顶栏」决定「搜索框」能不能单独控制：勾上就灰显，取消就恢复，
+        // 必须立即重算，否则要关掉面板再打开才更新。
+        if (el.dataset.ui === 'topbar') renderUiDeps();
+        syncAll();
+        save();
+      });
+    });
+
+    // 折叠分组（页面元素 / 评论区）：箭头展开收起 + 总开关一键全选/全不选
+    function bindFold(toggleSel, foldSel, allSel, filter) {
+      const fold = $(foldSel);
+      const toggle = $(toggleSel);
+      if (fold && toggle) {
+        toggle.addEventListener('click', () => {
+          const open = fold.hidden;
+          fold.hidden = !open;
+          toggle.setAttribute('aria-expanded', String(open));
+        });
+      }
+      const all = $(allSel);
+      if (!all) return;
+      all.addEventListener('change', () => {
+        const v = all.checked;
+        settings.uiHide = settings.uiHide || {};
+        $$('input[data-ui]').filter(filter).forEach(el => {
+          el.checked = v;
+          settings.uiHide[el.dataset.ui] = v;
+        });
+        renderUiDeps();
+        syncAll();
+        save();
+      });
+    }
+    bindFold('#uiToggle', '#uiFold', '#uiAll', el => !el.hasAttribute('data-cm'));
+    bindFold('#cmToggle', '#cmFold', '#cmAll', el => el.hasAttribute('data-cm'));
+
+    // 直播间精简：标题行右侧的向下箭头展开 / 收起板块选项
+    const liveToggle = $('#liveToggle');
+    if (liveToggle) {
+      liveToggle.addEventListener('click', () => {
+        if (settings.liveClean === false) return;
+        liveOpen = !liveOpen;
+        $('#liveCustom').hidden = !liveOpen;
+        liveToggle.setAttribute('aria-expanded', String(liveOpen));
+      });
+    }
 
     const colorInput = $('#progressColor');
     colorInput.addEventListener('input', () => {
@@ -321,7 +473,7 @@
     if (clearBtn) {
       clearBtn.addEventListener('click', async () => {
         try {
-          await chrome.storage.local.set({ [RULE_KEY]: { topics: [], authors: [] } });
+          await chrome.storage.local.set({ [RULE_KEY]: { topics: [], authors: [], keywords: [] } });
           await refreshRules();
           toast('已清空屏蔽规则');
         } catch (e) {
@@ -329,6 +481,19 @@
         }
       });
     }
+
+    const ruleAdd = $('#ruleAdd');
+    if (ruleAdd) ruleAdd.addEventListener('click', addRule);
+    const ruleInput = $('#ruleInput');
+    if (ruleInput) {
+      ruleInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          addRule();
+        }
+      });
+    }
+
   }
 
   async function readStored() {

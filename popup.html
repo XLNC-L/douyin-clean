@@ -128,17 +128,20 @@
       <label class="row">
         <span class="row-main">
           <span class="row-title">游戏推广卡片</span>
-          <span class="row-desc">隐藏左下角「游戏 XX」这类卡片，暂停时出现的也一并隐藏</span>
+          <span class="row-desc">独立于浮层自动隐藏：左下角「游戏 XX · 评分」推广卡（暂停时出现的也一并隐藏）</span>
         </span>
         <input class="switch" type="checkbox" data-key="hideGame">
       </label>
-      <label class="row">
+      <div class="row row-head">
         <span class="row-main">
           <span class="row-title">直播间精简</span>
           <span class="row-desc">按需隐藏礼物栏、榜单入口等板块</span>
         </span>
-        <input class="switch" type="checkbox" data-key="liveClean">
-      </label>
+        <input class="switch" type="checkbox" data-key="liveClean" aria-label="直播间精简">
+        <button id="liveToggle" class="arrow-btn" type="button" aria-expanded="false" aria-controls="liveCustom" aria-label="展开直播间精简选项">
+          <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
       <div id="liveCustom" class="fold" hidden>
         <div class="fold-head">
           <span>勾选要隐藏的板块</span>
@@ -151,6 +154,64 @@
           <label class="chip"><input type="checkbox" data-live-part="head"><span>顶栏推广</span></label>
         </div>
         <p class="hint">右侧聊天区、观众榜、主播信息条与播放器控制始终保留。</p>
+      </div>
+    </section>
+
+    <section class="card" id="uiCard">
+      <div class="card-head">
+        <h2>页面元素</h2>
+        <label class="mini-switch" title="一键全部隐藏">
+          <input id="uiAll" type="checkbox" aria-label="一键全部隐藏页面元素">
+        </label>
+        <button id="uiToggle" class="arrow-btn" type="button" aria-expanded="false" aria-controls="uiFold" aria-label="展开页面元素">
+          <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+      <p id="uiHint" class="hint">勾选即隐藏，取消立即恢复；开关可一键全选。展开后逐项勾选。</p>
+      <div id="uiFold" class="fold" hidden>
+        <div class="nav-list">
+          <label class="chip"><input type="checkbox" data-ui="topbar"><span>顶栏</span></label>
+          <label class="chip"><input type="checkbox" data-ui="search"><span>搜索框</span></label>
+          <label class="chip"><input type="checkbox" data-ui="author"><span>作者信息</span></label>
+          <label class="chip"><input type="checkbox" data-ui="desc"><span>标题文案</span></label>
+          <label class="chip"><input type="checkbox" data-ui="product"><span>商品卡片</span></label>
+          <label class="chip"><input type="checkbox" data-ui="ai"><span>AI</span></label>
+          <label class="chip"><input type="checkbox" data-ui="recommend"><span>推荐标签</span></label>
+          <label class="chip"><input type="checkbox" data-ui="avatar"><span>头像关注</span></label>
+          <label class="chip"><input type="checkbox" data-ui="digg"><span>点赞</span></label>
+          <label class="chip"><input type="checkbox" data-ui="comment"><span>评论</span></label>
+          <label class="chip"><input type="checkbox" data-ui="collect"><span>收藏</span></label>
+          <label class="chip"><input type="checkbox" data-ui="share"><span>分享</span></label>
+          <label class="chip"><input type="checkbox" data-ui="more"><span>更多</span></label>
+          <label class="chip"><input type="checkbox" data-ui="music"><span>听抖音</span></label>
+          <label class="chip"><input type="checkbox" data-ui="controls"><span>控制条</span></label>
+          <label class="chip"><input type="checkbox" data-ui="progress"><span>原生进度</span></label>
+          <label class="chip"><input type="checkbox" data-ui="arrows"><span>切换箭头</span></label>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="cmCard">
+      <div class="card-head">
+        <h2>评论区</h2>
+        <label class="mini-switch" title="一键隐藏全部">
+          <input id="cmAll" type="checkbox" aria-label="一键隐藏全部评论区元素">
+        </label>
+        <button id="cmToggle" class="arrow-btn" type="button" aria-expanded="false" aria-controls="cmFold" aria-label="展开评论区元素">
+          <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+      <p id="cmHint" class="hint">逐项隐藏评论区顶部元素；七项全部隐藏时评论列表自动上移贴顶，右上角关闭按钮始终保留。</p>
+      <div id="cmFold" class="fold" hidden>
+        <div class="nav-list">
+          <label class="chip"><input type="checkbox" data-ui="cmai" data-cm><span>AI tab</span></label>
+          <label class="chip"><input type="checkbox" data-ui="cmworks" data-cm><span>TA的作品</span></label>
+          <label class="chip"><input type="checkbox" data-ui="cmcomment" data-cm><span>评论 tab</span></label>
+          <label class="chip"><input type="checkbox" data-ui="cmmix" data-cm><span>合集</span></label>
+          <label class="chip"><input type="checkbox" data-ui="cmrec" data-cm><span>相关推荐</span></label>
+          <label class="chip"><input type="checkbox" data-ui="cmhot" data-cm><span>热点</span></label>
+          <label class="chip"><input type="checkbox" data-ui="cmsearch" data-cm><span>大家都在搜</span></label>
+        </div>
       </div>
     </section>
 
@@ -194,6 +255,12 @@
 
     <section class="card">
       <h2>手动屏蔽</h2>
+      <div class="rule-add">
+        <input id="ruleInput" class="rule-input" type="text" maxlength="40" placeholder="文案关键词，或以 # 开头的话题">
+        <button id="ruleAdd" class="link-btn" type="button">添加</button>
+      </div>
+      <p class="hint">关键词在文案（标题 / 描述 / 话题）里出现即跳过；以 # 开头的按话题精确匹配。刷视频时 Alt + Shift + X 仍可一键屏蔽当前视频的话题 / 作者，再按一次取消。</p>
+      <div id="ruleList" class="rule-list"></div>
       <div class="row row-static">
         <span class="row-main">
           <span class="row-title">屏蔽规则</span>
@@ -201,8 +268,8 @@
         </span>
         <button id="clearRules" class="link-btn" type="button">清空</button>
       </div>
-      <p class="hint">刷视频时按 Alt + Shift + X 屏蔽当前视频的话题 / 作者，之后同类视频自动跳过；再按一次取消。</p>
     </section>
+
   </main>
 
   <footer class="foot">

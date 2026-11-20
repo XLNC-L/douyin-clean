@@ -91,6 +91,49 @@
   // 恢复播放后由 main.js 的 2 秒看门狗调用 retryPending() 补跳。
   let pendingSkip = null;
 
+  // ---------- 判定诊断日志 ----------
+  // 「该跳没跳」带随机性（容器晚到 / 布局瞬时异常 / 切条被手动操作打断），
+  // 只靠现场重试很难抓到。这里把关键节点记进环形缓冲，用户在 popup 里
+  // 一键复制，就能把当时的现场发回来，不用打开 DevTools。
+  // 只记关键节点和"结构发生变化的未命中"，不记每一次扫描 ——
+  // 单条视频 60 秒窗口内有 120 次扫描，全记会把有用记录挤掉。
+  const DIAG_MAX = 600;
+  let diag = [];
+  let diagSeq = 0;
+  let lastMissKey = '';
+
+  function diagAdd(kind, data) {
+    diag.push(Object.assign({ n: ++diagSeq, t: Date.now(), kind }, data || {}));
+    if (diag.length > DIAG_MAX) diag.splice(0, diag.length - DIAG_MAX);
+  }
+
+  // 判定依赖的结构快照：视频尺寸、时长、是否在播、在播视频是否对得上、
+  // 卡片里的 feed-live 容器尺寸、LivePlayer 容器是否存在。
+  // 这些正是"第一次不跳、划回才跳"时最需要比对的东西。
+  function snapOf(video) {
+    const out = { gen: D.gen, passes: st.passes, blocked: st.blocked };
+    if (!video || !video.getBoundingClientRect) return out;
+    const vr = video.getBoundingClientRect();
+    out.vw = Math.round(vr.width);
+    out.vh = Math.round(vr.height);
+    out.paused = video.paused;
+    const d = video.duration;
+    out.dur = d === Infinity ? 'inf' : (typeof d === 'number' && isFinite(d) ? Math.round(d * 10) / 10 : String(d));
+    out.same = D.playingVideo() === video ? 1 : 0;
+    out.livePlayer = video.closest(LIVE_PLAYER_SEL) ? 1 : 0;
+    const card = video.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"]') || video.parentElement;
+    out.live = [];
+    if (card) {
+      let n = 0;
+      for (const el of card.querySelectorAll('[data-e2e="feed-live"]')) {
+        if (++n > 5) break;
+        const r = el.getBoundingClientRect();
+        out.live.push(Math.round(r.width) + 'x' + Math.round(r.height));
+      }
+    }
+    return out;
+  }
+
   // ---------- 手动返回过的不再自动跳过 ----------
   // 需求：自动跳过的广告 / 直播，如果用户又手动滑回来了，说明他其实想看，
   // 之后遇到这一条不再跳，避免"感兴趣的内容被略过"。
@@ -189,9 +232,18 @@
   // 现在只有这里会写名单，并且要求代次确实变过（证明真的切走了）。
   const onManualBack = () => {
     if (!respectBack() || !pendingBack) return;
+    // 只认"刚被扩展跳走、且马上滑回来"的那一条。以前 pendingBack 永不过期，
+    // 几分钟后随手向上滚一次、正好滚回当时命中的那条，就会被永久拉黑 ——
+    // 实测表现就是"广告、直播都不再判"，因为这个视频再也没进过判定。
+    if (Date.now() - pendingBack.at > 6000) {
+      pendingBack = null;
+      return;
+    }
     const want = pendingBack.vid;
     const genAt = pendingBack.gen;
+    const at = pendingBack.at;
     setTimeout(() => {
+      if (Date.now() - at > 6800) { pendingBack = null; return; }
       if (D.gen === genAt) return;             // 根本没切走，不算返回
       const v = D.playingVideo();
       const vid = v && vidOf(v);
@@ -203,6 +255,7 @@
       }
       pendingBack = null;
       D.log('filter: 用户手动滑回，之后不再跳', vid);
+      diagAdd('manual-back', { vid: vid.slice(0, 24) });
     }, 700);
   };
   window.addEventListener('wheel', e => { if (e.deltaY < 0) onManualBack(); }, true);
@@ -215,6 +268,7 @@
   // 排队的复核还会继续执行，观感就是"我手动操作了，它又自己跳"。
   // 所以只要检测到真实手势，就让排队中的切条放弃。
   let lastUserAct = 0;
+  let lastDoneAt = 0;              // 上次切条成功的时刻
   const noteUserAct = () => { lastUserAct = Date.now(); };
   window.addEventListener('wheel', noteUserAct, { capture: true, passive: true });
   window.addEventListener('keydown', noteUserAct, true);
@@ -380,6 +434,23 @@
       const vb = svg.getAttribute('viewBox') || '';
       if (vb === '0 0 30 16' && Math.abs(r.top - nr.top) <= 14) return '广告标识';
     }
+    // 兜底：另一版不是 svg，而是昵称右侧一个写着「广告」的小标签（红底白字，实测宽约 30）。
+    // 只认文本完全等于「广告」、尺寸很小、且与昵称同一行 —— 标题正文里的"广告"两个字
+    // 文本更长，不会被这里命中。
+    // 先查昵称所在容器，再退到它的父级（不同版本的标签挂载层级不一样）。
+    for (const scope of [box, box.parentElement]) {
+      if (!scope || !scope.querySelectorAll) continue;
+      let k = 0;
+      for (const el of scope.querySelectorAll('span, div, i, button')) {
+        if (++k > 200) break;
+        if (D.textOf(el) !== '广告') continue;
+        const r = el.getBoundingClientRect();
+        if (r.width < 10 || r.width > 70) continue;
+        if (r.height < 8 || r.height > 28) continue;
+        if (Math.abs(r.top - nr.top) > 16) continue;
+        return '广告标识';
+      }
+    }
     return '';
   }
 
@@ -544,9 +615,9 @@
   // 于是一条"点不动"的视频会一直播到用户手动划走，所有后续判定都被 blocked 挡掉。
   // 第三层也不再发合成 KeyboardEvent：isTrusted=false，抖音的事件委托不接受，等于没有兜底。
   const SWITCH_TRIES = 3;
-  const SWITCH_RECHECK = 500;        // 每次尝试后多久复核（抖音换片通常在几百毫秒内完成）
-  const SWITCH_MIN_GAP = 600;        // 两次切条之间的最小间隔
-  const SWITCH_RETRY_DELAY = 2000;   // 三次都失败后隔多久重新判定
+  const SWITCH_RECHECK = 400;        // 每次尝试后多久复核（抖音换片通常在几百毫秒内完成）
+  const SWITCH_MIN_GAP = 500;        // 两次切条之间的最小间隔
+  const SWITCH_RETRY_DELAY = 1000;   // 三次都失败后隔多久重新判定
 
   // 找承载信息流的可滚动容器（抖音是 scroll-snap，滚一屏会吸附到下一条）
   function scrollTarget(video) {
@@ -559,23 +630,80 @@
     return null;
   }
 
+  // 离当前视频最近、且可见的"下一条"箭头。页面上可能同时存在多个（含隐藏 /
+  // 旧卡片里的），以前用 querySelector 取第一个经常会点到别的容器 ——
+  // 实测就是"连点三次都没切走"。
+  // 不能再按"距视频左右 260px"筛：评论面板打开时视频只有 1414 宽，
+  // 而箭头在 x≈1996（贴着评论面板左侧），距离 580px，会被整批排除。
+  function nearestArrow(video) {
+    const vr = video.getBoundingClientRect();
+    let best = null;
+    let bestD = Infinity;
+    let n = 0;
+    for (const a of document.querySelectorAll(D.SEL.nextArrow)) {
+      if (++n > 8) break;
+      const r = a.getBoundingClientRect();
+      if (r.width < 8 || r.height < 8) continue;
+      if (r.right <= 0 || r.left >= window.innerWidth) continue;      // 必须在视口内
+      const d = Math.abs((r.top + r.bottom) / 2 - (vr.top + vr.bottom) / 2);
+      if (d > Math.max(vr.height, 240)) continue;                     // 垂直方向大致同一屏
+      if (d < bestD) { bestD = d; best = a; }
+    }
+    return best;
+  }
+
+  // 合成 click 有时不触发抖音的 React 处理，补齐完整指针序列再补一次 click。
+  function clickReal(el) {
+    const r = el.getBoundingClientRect();
+    const opt = {
+      bubbles: true, cancelable: true, composed: true,
+      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+      button: 0, buttons: 1, pointerId: 1, isPrimary: true, pointerType: 'mouse'
+    };
+    try {
+      el.dispatchEvent(new PointerEvent('pointerover', opt));
+      el.dispatchEvent(new PointerEvent('pointerenter', opt));
+      el.dispatchEvent(new PointerEvent('pointerdown', opt));
+      el.dispatchEvent(new MouseEvent('mousedown', opt));
+      el.dispatchEvent(new PointerEvent('pointerup', { ...opt, buttons: 0 }));
+      el.dispatchEvent(new MouseEvent('mouseup', { ...opt, buttons: 0 }));
+      el.dispatchEvent(new MouseEvent('click', { ...opt, buttons: 0 }));
+    } catch (e) {
+      try { el.click(); } catch (e2) { /* 忽略 */ }
+    }
+  }
+
   function switchAttempt(video, i) {
-    // 1) 原生"下一条"箭头：和用户点一样走抖音自己的能力
-    if (i === 0) {
-      const arrow = document.querySelector(D.SEL.nextArrow);
-      if (arrow && arrow.getBoundingClientRect().width > 0) {
-        try { arrow.click(); } catch (e) { /* 忽略 */ }
+    // 1) 原生"下一条"箭头：和用户点一样走抖音自己的能力。
+    //    第 1、3 次都点箭头，中间夹一次滚动 —— 两种路径都试到，且不同时触发，
+    //    避免"点了箭头又滚一屏"一次跳过两条。
+    if (i !== 1 && i !== 2) {
+      const arrow = nearestArrow(video);
+      if (arrow) {
+        clickReal(arrow);
         return;
       }
     }
     // 2) 滚动容器滚一屏；第二次多滚 30%，防止 scroll-snap 又吸回原位
-    const node = scrollTarget(video);
-    if (node) {
-      try { node.scrollBy({ top: node.clientHeight * (i >= 1 ? 1.3 : 1.0), behavior: 'auto' }); } catch (e) { /* 忽略 */ }
+    if (i === 1) {
+      const node = scrollTarget(video);
+      if (node) {
+        try { node.scrollBy({ top: node.clientHeight * 1.3, behavior: 'auto' }); } catch (e) { /* 忽略 */ }
+        return;
+      }
+      try { window.scrollBy({ top: window.innerHeight * 1.3, behavior: 'auto' }); } catch (e) { /* 忽略 */ }
       return;
     }
-    // 3) 找不到容器时兜底滚窗口
-    try { window.scrollBy({ top: window.innerHeight, behavior: 'auto' }); } catch (e) { /* 忽略 */ }
+    // 3) 键盘：抖音网页版支持 ↓ / PageDown 切下一条，容器找不到时用它兜底
+    try {
+      const ke = { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, which: 40, bubbles: true, cancelable: true };
+      (document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keydown', ke));
+      (document.activeElement || document.body).dispatchEvent(new KeyboardEvent('keyup', { ...ke, keyCode: 0 }));
+    } catch (e) { /* 忽略 */ }
+    const node = scrollTarget(video);
+    if (node) {
+      try { node.scrollBy({ top: node.clientHeight, behavior: 'auto' }); } catch (e) { /* 忽略 */ }
+    }
   }
 
   // 三次都没切走：清掉 blocked，隔 4 秒重新判定一次（不再永久锁死）。
@@ -584,6 +712,7 @@
     if (!video || !video.isConnected) return;
     if (D.gen !== genAt) return;
     st.skipFail = (st.skipFail || 0) + 1;
+    diagAdd('giveup', { fails: st.skipFail });
     if (st.skipFail >= 3) {
       st.blocked = false;
       D.log('filter: 本条连续切条失败 ' + st.skipFail + ' 轮，先停手（换片后重试）');
@@ -633,29 +762,63 @@
     }
     lastSkip = now;
 
-    // 记下这一条的身份：用户如果手动滑回来，就记进"不再跳过"名单。
-    // 同时记下当前代次，只有"确实切走过"（代次变了）才算用户主动返回，
-    // 否则切条失败、视频还停在原处时会被误判成"用户滑回来了"。
-    if (respectBack()) {
-      const vid = vidOf(video);
-      if (vid) pendingBack = { vid, at: now, gen: D.gen };
+    // 记下这一条的身份，但**先不登记**：只有确认真切走了才登记。
+    // 命中即登记的话，切条失败 / 被手动操作打断都会留下一条记录，
+    // 之后用户随手向上滚一下就可能被误记进"不再跳过"名单。
+    const skipVid = respectBack() ? vidOf(video) : '';
+
+    // 暂停态下抖音的"下一条"箭头是隐藏的、滚动容器也不响应 ——
+    // 实测强信号命中后连点三次都没切走。强信号本来就要跳，先恢复播放让切条通道可用。
+    if (video && video.paused && force) {
+      try {
+        const p = video.play();
+        if (p && p.catch) p.catch(() => { /* 自动播放被拒时忽略 */ });
+      } catch (e) { /* 忽略 */ }
     }
 
     const genAt = D.gen;
     const step = i => {
       if (!video || !video.isConnected) return;
       switchAttempt(video, i);
+      diagAdd('switch', { i, gen: genAt });
       setTimeout(() => {
-        if (!video || !video.isConnected || document.hidden) return;
-        if (D.gen !== genAt) return;              // 代次变了 = 真的切走了
-        // 用户在这段排队空档里自己动过手：收手，别再追加滚动
-        if (Date.now() - lastUserAct < 900) {
-          D.log('filter: 用户手动操作，放弃本次切条');
+        if (!video || !video.isConnected || document.hidden) {
+          diagAdd('abort', { why: 'gone', i });
+          return;
+        }
+        if (D.gen !== genAt) {
+          // 确认真的切走了，才登记"刚被跳过的那条"：用户 6 秒内滑回来才进名单
+          if (skipVid) pendingBack = { vid: skipVid, at: Date.now(), gen: D.gen };
+          lastDoneAt = Date.now();
+          diagAdd('done', { i, use: 'gen' });
+          return;                                 // 代次变了 = 真的切走了
+        }
+        // 用户在这段排队空档里正在连续操作（滚轮还在滚 / 手指没离开）：收手。
+        // 必须同时解锁，否则命中后的 blocked 会一直卡到换片。
+        // 窗口只要 250ms —— 之前是 900ms，导致"自己划到直播条"也会被当成
+        // 用户干预而放弃，硬生生多等 1.2 秒才重试，这就是"第一次跳得慢"。
+        if (Date.now() - lastUserAct < 250) {
+          D.log('filter: 用户正在操作，放弃本次切条');
+          st.blocked = false;
+          st.retryAt = Date.now() + 600;
+          // 必须自己排下一次：播放态下没有别的入口会再调 judge，
+          // 只设 retryAt 等于把这条永久搁置（实测"广告一直不跳"就是这个）。
+          clearTimeout(judgeTimer);
+          judgeTimer = setTimeout(() => judge(video), 600);
+          diagAdd('abort', { why: 'user-act', i });
           return;
         }
         // 换片动画进行中代次可能还没更新，但旧视频已经滚出视口 → 也认为切走了，
         // 否则会在动画中途再滚一屏，一次跳过两条。
-        if (D.visibleArea(video) < 10000) return;
+        // 但如果是布局瞬时塌成 0（直播/长图卡片偶发），同样要解锁，否则卡死到换片。
+        if (D.visibleArea(video) < 10000) {
+          diagAdd('abort', { why: 'offscreen', i, area: D.visibleArea(video) });
+          st.blocked = false;
+          st.retryAt = Date.now() + 1500;
+          clearTimeout(judgeTimer);
+          judgeTimer = setTimeout(() => judge(video), 1500);
+          return;
+        }
         if (i + 1 < SWITCH_TRIES) step(i + 1);
         else giveUpSwitch(video, genAt);
       }, SWITCH_RECHECK);
@@ -683,6 +846,9 @@
     if (!enabled() && !liveEnabled()) return;
     if (!D.route.feed) return;
     if (!video.isConnected) return;
+    // 刚切走 1.5 秒内不再判：切换动画期间旧直播容器还挂在 DOM 上，
+    // 新视频会被再判一次"直播"，于是重复切条甚至切三次后放弃（实测）。
+    if (Date.now() - lastDoneAt < 1500) return;
     // 暂停时不再直接放弃判定：暂停层里确实可能有"相关推荐 / 商品卡"，
     // 所以暂停期间命中只登记待跳（pendingSkip），等恢复播放后再重判一次才跳。
     // 旧版这里直接 return，命中过的那条广告恢复播放时也不会再跳（blocked 已锁死）。
@@ -694,8 +860,13 @@
     // 传进来的不是当前在播的那条时，改判在播的那条，并让本轮重新开始。
     const cur = D.playingVideo();
     if (cur && cur !== video) {
+      // 记录"判定对象被换成在播视频"：这条如果频繁出现，说明传进来的
+      // 一直是预加载 / 旧卡片，真实在播的那条反而没被检查。
+      diagAdd('redirect', { gen: D.gen, fromPaused: video.paused });
       video = cur;
-      st.gen = -1;
+      // 注意：这里不要清 st。同一代次内播放器重建（换清晰度 / 元素复用）很常见，
+      // 一清就会把刚生效的 blocked 一起抹掉，变成"命中 → 再切一次 → 被放弃"的循环，
+      // 实测会把首次跳过从 1 秒拖到 2 秒以上。换片由下面的 D.gen 判断负责。
     }
     if (D.isOverlayVideo(video)) return;
 
@@ -706,6 +877,7 @@
       if (vid) {
         if (noSkip.has(vid)) {
           publish('手动返回过，不再跳过', 0);
+          diagAdd('no-skip', { vid: vid.slice(0, 24) });
           return;
         }
         if (userBack && userBack.vid === vid && Date.now() - userBack.at < 3000) {
@@ -723,7 +895,13 @@
 
     const now = Date.now();
     if (!st.firstAt) st.firstAt = now;
-    if (now < st.retryAt) return;       // 上一轮三次都没切走，等冷却结束再判
+    if (now < st.retryAt) {
+      // 放弃切条后设了冷却，但不能只靠外部事件再唤醒：播放态下看门狗不调 judge，
+      // 到点没人来，这条就永久不判了。这里自己排一次。
+      clearTimeout(judgeTimer);
+      judgeTimer = setTimeout(() => judge(video), Math.max(100, st.retryAt - now + 50));
+      return;
+    }
     if (now - st.last < 200) return;    // 同一视频短时间内别重复扫
     st.last = now;
 
@@ -736,7 +914,18 @@
     // 初始化、切流完成后才挂上 feed-live 容器，超过 12 秒就彻底漏掉。
     // 现在播放 / 暂停统一给 60 秒：前 12 秒高频（450/800ms），之后降到 2 秒一次。
     const win = 60000;
-    if (now - st.firstAt > win) return;
+    if (now - st.firstAt > win) {
+      // 窗口用完后不能彻底停判：直播容器、商品卡经常在停留很久之后才挂上来
+      // （抖音自动连播时不换代次），彻底停就等于永远不跳。
+      // 改成低频续判（3 秒一次），开销可以忽略。
+      if (!st.winLogged) {
+        st.winLogged = true;
+        diagAdd('window-end', snapOf(video));
+      }
+      clearTimeout(judgeTimer);
+      judgeTimer = setTimeout(() => judge(video), 3000);
+      return;
+    }
     st.passes++;
 
     // 广告和直播是两个独立开关，谁开着就查谁
@@ -750,6 +939,14 @@
     if (!reason) {
       liveStreak = 0;                   // 回到正常视频，连续直播计数清零
       liveCooldownUntil = 0;
+      // 未命中也留痕：只在结构变化（尺寸 / 时长 / 容器 / 是否在播 / 判定对象是否对得上）
+      // 或每 2 秒一次时记录，避免 250ms 一次的扫描把环形缓冲刷满。
+      const snap = snapOf(video);
+      const key = [snap.vw, snap.vh, snap.dur, snap.paused, snap.same, snap.livePlayer, snap.live.join(',')].join('|');
+      if (key !== lastMissKey || now - (diag.length ? diag[diag.length - 1].t : 0) > 2000) {
+        lastMissKey = key;
+        diagAdd('miss', Object.assign({ cost, en: enabled() ? 1 : 0, lv: liveEnabled() ? 1 : 0 }, snap));
+      }
       // 命中后如果最终没切走（容器消失 / 误判），blocked 会一直锁到换片，
       // 这条视频之后就再也不会被检查。给一个 3 秒的释放窗口。
       if (st.blocked && Date.now() - (st.hitAt || 0) > 3000) st.blocked = false;
@@ -761,10 +958,18 @@
       return;
     }
 
-    if (st.blocked) return;
+    // 命中后不重复操作，但不能永久锁死：切条可能被手动操作 / 布局瞬时异常打断，
+    // 一旦这里一直 return，这条视频会卡到用户手动划走（代次变化）才会重判 ——
+    // 表现就是"第一次没跳，划走再划回来才跳"。给 2.5 秒自动解锁。
+    if (st.blocked) {
+      if (Date.now() - (st.hitAt || 0) < 2500) return;
+      st.blocked = false;
+      diagAdd('unblock', { reason, waited: Date.now() - (st.hitAt || 0) });
+    }
     st.blocked = true;
     st.hitAt = Date.now();
     D.log('filter: 识别到', reason, '，跳过该视频');
+    diagAdd('hit', Object.assign({ reason, cost, paused: video.paused }, snapOf(video)));
 
     // 连续直播过多时短暂冷却，避免推荐流整屏都是直播时无限快速切条。
     // 冷却从 20 秒压到 10 秒：原来只要连着遇到 5 条直播就会停 20 秒，
@@ -772,6 +977,7 @@
     if (reason.indexOf('直播') !== -1) {
       if (Date.now() < liveCooldownUntil) {
         D.log('filter: 直播冷却中，暂不跳');
+        diagAdd('cooldown', { left: liveCooldownUntil - Date.now(), streak: liveStreak });
         return;
       }
       liveStreak++;
@@ -779,6 +985,7 @@
         liveStreak = 0;
         liveCooldownUntil = Date.now() + 10000;
         D.log('filter: 连续直播过多，暂停 10 秒');
+        diagAdd('cooldown-start', { ms: 10000 });
         return;
       }
     } else {
@@ -797,6 +1004,7 @@
     if (video.paused && !strong) {
       pendingSkip = { gen: D.gen, reason, at: Date.now(), video };
       D.log('filter: 弱信号命中但视频暂停，登记待跳', reason);
+      diagAdd('pending', { reason });
       return;
     }
     next(video, strong);
@@ -885,13 +1093,240 @@
     return null;
   }
 
+  // ---------- 头像旁直播小窗：结构快照 ----------
+  // 这种小窗只显示几秒就自动消失，等开发者来看时早就没了。
+  // 这里在它出现的那一刻把结构记进诊断日志（popup 一键复制），
+  // 之后按真实结构补关闭逻辑，不用再靠猜。
+  const POPUP_SEL = '[class*="live" i], [data-e2e*="live" i], [class*="preview" i], [class*="float" i], canvas, iframe';
+  const popupSeen = new Map();          // 结构签名 -> 最近一次记录时间
+  let popupScanAt = 0;
+
+  function popupChainOf(el) {
+    const chain = [];
+    let node = el;
+    for (let i = 0; i < 5 && node && node !== document.body; i++, node = node.parentElement) {
+      const cls = String(node.className || '').trim().split(/\s+/).slice(0, 2).filter(Boolean).join('.');
+      const e2e = node.getAttribute('data-e2e') || '';
+      chain.push(node.tagName + (cls ? '.' + cls : '') + (e2e ? '[' + e2e + ']' : ''));
+    }
+    return chain;
+  }
+
+  // 只扫"画面右侧、小尺寸、可见"的节点，并限制候选数量；
+  // 同一结构 10 秒内只记一次，避免小窗常驻时把日志刷满。
+  function scanLivePopups(main) {
+    const now = Date.now();
+    if (now - popupScanAt < 900) return;
+    popupScanAt = now;
+    let n = 0;
+    for (const el of document.querySelectorAll(POPUP_SEL)) {
+      if (++n > 60) break;
+      if (main && (el === main || el.contains(main) || main.contains(el))) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 60 || r.width > 380) continue;
+      if (r.height < 60 || r.height > 480) continue;
+      if (r.left < window.innerWidth * 0.55) continue;    // 头像旁 / 画面右侧
+      if (r.bottom < 0 || r.top > window.innerHeight) continue;
+      const cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity || '1') < 0.1) continue;
+      const sig = el.tagName + '|' + String(el.className || '').slice(0, 50) + '|' +
+        Math.round(r.width) + 'x' + Math.round(r.height);
+      if (now - (popupSeen.get(sig) || 0) < 10000) continue;
+      popupSeen.set(sig, now);
+      if (popupSeen.size > 60) {
+        for (const [k, t] of popupSeen) if (now - t > 60000) popupSeen.delete(k);
+      }
+      diagAdd('live-popup', {
+        rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
+        tag: el.tagName,
+        txt: D.textOf(el).slice(0, 60),
+        v: el.querySelector('video') ? 1 : 0,
+        img: el.querySelector('img') ? 1 : 0,
+        cv: el.querySelector('canvas') ? 1 : 0,
+        ifr: el.querySelector('iframe') ? 1 : 0,
+        btn: closeBtnIn(el.parentElement || el) ? 1 : 0,
+        chain: popupChainOf(el)
+      });
+    }
+  }
+
+  // 头像旁 / 右侧的直播预览小窗（实测 166×296）：只显示几秒，露着干扰观看。
+  // 这类小窗不能当成"当前视频是直播"去跳过（那会误伤正常视频），
+  // 所以单独处理：直接隐藏，并把结构记进诊断日志备查。
+  // 只认 [data-e2e="feed-live"] 且小尺寸，全屏直播（1980×871）不受影响。
+  let miniScanAt = 0;
+  let miniHidden = [];
+  let miniDiagAt = 0;
+
+  // 小窗一插进 DOM 就标记，不等 1 秒轮询 —— 否则会先露出来几百毫秒再消失，
+  // 这段时间正好压住右侧互动栏，鼠标移上去不出点赞/评论。
+  function markMiniNow(el) {
+    if (!el || el.nodeType !== 1 || !el.matches) return;
+    if (!el.matches('[data-e2e="feed-live"]')) return;
+    requestAnimationFrame(() => {
+      if (!el.isConnected || el.hasAttribute('data-dyc-mini-hide')) return;
+      const r = el.getBoundingClientRect();
+      if (r.width < 60 || r.width > 420) return;
+      if (r.height < 60 || r.height > 640) return;
+      el.setAttribute('data-dyc-mini-hide', '');
+      miniHidden.push(el);
+      // 外层白框同样要收，否则会剩一圈白底 + 右上角的 ×
+      const box = miniBoxOf(el);
+      if (box) {
+        closeMiniBox(box);
+        box.setAttribute('data-dyc-mini-hide', '');
+        miniHidden.push(box);
+      }
+      diagAdd('live-mini-hide', {
+        why: 'observer',
+        rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
+        box: box ? [Math.round(box.getBoundingClientRect().width), Math.round(box.getBoundingClientRect().height)] : null,
+        chain: popupChainOf(el)
+      });
+    });
+  }
+
+  const miniMo = new MutationObserver(muts => {
+    for (const m of muts) {
+      if (m.type !== 'childList' || !m.addedNodes.length) continue;
+      for (const node of m.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        if (node.matches('[data-e2e="feed-live"]')) markMiniNow(node);
+        else if (node.querySelector) {
+          const inner = node.querySelector('[data-e2e="feed-live"]');
+          if (inner) markMiniNow(inner);
+        }
+      }
+    }
+  });
+  miniMo.observe(document.documentElement, { childList: true, subtree: true });
+
+  // 小窗外面那层卡片（白底 + 右上角关闭按钮）。内层 feed-live 透明后，
+  // 这层白框仍会留在画面上，所以必须一起处理。
+  // 实测这层自己 background 是透明的（白色来自伪元素 / 内层装饰），
+  // 所以不能按背景色判断，只能按"比小窗略大、紧包着它"来认。
+  function miniBoxOf(el) {
+    const er = el.getBoundingClientRect();
+    let node = el.parentElement;
+    for (let i = 0; i < 3 && node && node !== document.body; i++, node = node.parentElement) {
+      const r = node.getBoundingClientRect();
+      if (r.width < er.width - 2 || r.width > er.width + 90) continue;
+      if (r.height < er.height - 2 || r.height > er.height + 110) continue;
+      if (r.width < 80 || r.height < 80) continue;
+      return node;
+    }
+    return null;
+  }
+
+  // 优先点卡片自带的关闭按钮：抖音会自己把整张卡片移除，比我们打标记更彻底。
+  function closeMiniBox(box) {
+    if (!box) return false;
+    const br = box.getBoundingClientRect();
+    let n = 0;
+    const sel = 'button, [role="button"], [class*="close" i], [aria-label*="关闭"], [title*="关闭"]';
+    for (const b of box.querySelectorAll(sel)) {
+      if (++n > 10) break;
+      const r = b.getBoundingClientRect();
+      if (r.width < 8 || r.height < 8 || r.width > 60 || r.height > 60) continue;
+      // 关闭按钮一般在右上角；不在右上角的不点，避免误触播放 / 跳转
+      if (r.left < br.right - 110 || r.top > br.top + 90) continue;
+      try { b.click(); return true; } catch (e) { /* 忽略 */ }
+    }
+    return false;
+  }
+
+  function hideLiveMini(main) {
+    const now = Date.now();
+    if (now - miniScanAt < 500) return 0;
+    miniScanAt = now;
+    // 先复核已隐藏的：抖音会复用这个容器，一旦放大成全屏直播间必须立刻恢复，
+    // 否则直播间会被"透明化"，既不显示也跳不过去。
+    miniHidden = miniHidden.filter(el => {
+      if (!el.isConnected) return false;
+      const r = el.getBoundingClientRect();
+      if (r.width > 420 || r.height > 640) {
+        el.removeAttribute('data-dyc-mini-hide');
+        return false;
+      }
+      return true;
+    });
+    let n = 0;
+    let scanned = 0;
+    let skip = null;
+    const list = document.querySelectorAll('[data-e2e="feed-live"]');
+    for (const el of list) {
+      // 上限从 6 提到 40：抖音会给每张预加载卡片都挂一个 feed-live 占位，
+      // 真正的小窗经常排在第 7 个之后，之前直接被截断、永远轮不到。
+      if (++n > 40) break;
+      if (el.hasAttribute('data-dyc-mini-hide')) {
+        // 外层卡片可能在小窗插入的瞬间还没撑开，导致上一轮 box 找不到。
+        // 这里每轮补一次，撑开后就能补标上。
+        const late = miniBoxOf(el);
+        if (late && !late.hasAttribute('data-dyc-mini-hide')) {
+          late.setAttribute('data-dyc-mini-hide', '');
+          miniHidden.push(late);
+          diagAdd('live-mini-hide', {
+            why: 'late-box',
+            rect: [Math.round(late.getBoundingClientRect().width), Math.round(late.getBoundingClientRect().height)],
+            chain: popupChainOf(el)
+          });
+        }
+        continue;
+      }
+      const r = el.getBoundingClientRect();
+      if (r.width < 60 || r.width > 420 || r.height < 60 || r.height > 640) {
+        if (!skip) skip = { why: 'size', rect: [Math.round(r.width), Math.round(r.height)] };
+        continue;
+      }
+      if (r.right < 0 || r.left > window.innerWidth || r.bottom < 0 || r.top > window.innerHeight) {
+        if (!skip) skip = { why: 'offscreen', rect: [Math.round(r.left), Math.round(r.top)] };
+        continue;
+      }
+      const cs = getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden') {
+        if (!skip) skip = { why: 'css-hidden', rect: [Math.round(r.width), Math.round(r.height)] };
+        continue;
+      }
+      scanned++;
+      if (main && el.contains(main)) {
+        if (!skip) skip = { why: 'contains-main', rect: [Math.round(r.width), Math.round(r.height)] };
+        continue;
+      }
+      el.setAttribute('data-dyc-mini-hide', '');
+      miniHidden.push(el);
+      // 外层的白色卡片一起收掉：只处理内层会留下一圈白底和右上角的 ×
+      const box = miniBoxOf(el);
+      if (box) {
+        closeMiniBox(box);
+        box.setAttribute('data-dyc-mini-hide', '');
+        miniHidden.push(box);
+      }
+      diagAdd('live-mini-hide', {
+        rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
+        box: box ? [Math.round(box.getBoundingClientRect().left), Math.round(box.getBoundingClientRect().top),
+          Math.round(box.getBoundingClientRect().width), Math.round(box.getBoundingClientRect().height)] : null,
+        chain: popupChainOf(el),
+        html: el.outerHTML.replace(/\s+/g, ' ').slice(0, 500)
+      });
+    }
+    // 每 4 秒留一条现场快照：页面上到底有几个 feed-live、为什么一个都没藏成。
+    // 没有这条就只能靠猜（例如全部被 visibility:hidden 挡掉、或根本不在全局选择器里）。
+    if (now - miniDiagAt > 4000) {
+      miniDiagAt = now;
+      diagAdd('mini-scan', { total: list.length, hid: miniHidden.length, skip });
+    }
+    return scanned;
+  }
+
   function closePopups(video) {
     if (!enabled()) return;
     if (!D.route.feed) return;
     const now = Date.now();
-    if (now - lastClose < 800) return;                   // 关得太密容易误伤别的东西
 
     const main = (video instanceof HTMLVideoElement) ? video : D.playingVideo();
+    scanLivePopups(main);
+    hideLiveMini(main);
+    if (now - lastClose < 800) return;                   // 关得太密容易误伤别的东西
     let hit = null;
 
     let n = 0;
@@ -974,6 +1409,20 @@
         paused: v.paused
       };
     },
+    // 诊断日志：popup 的「复制判定日志」通过 dyc:get-diag 消息取走
+    diag() { return diag.slice(); },
+    clearDiag() { diag = []; lastMissKey = ''; },
+    // 「不再跳过」名单的条数与清空（popup 诊断卡片用）
+    noSkipCount() { return noSkip.size; },
+    clearNoSkip() {
+      const n = noSkip.size;
+      noSkip = new Set();
+      pendingBack = null;
+      userBack = null;
+      saveNoSkip();
+      D.log('filter: 已清空不再跳过名单', n, '条');
+      return n;
+    },
     reset() {
       clearTimeout(judgeTimer);
       st = { gen: -1, passes: 0, blocked: false, last: 0, retryAt: 0, firstAt: 0, skipFail: 0, hitAt: 0 };
@@ -984,6 +1433,8 @@
       pendingSkip = null;
       pendingBack = null;
       userBack = null;
+      miniHidden.forEach(el => el.removeAttribute('data-dyc-mini-hide'));
+      miniHidden = [];
     }
   };
 })();

@@ -93,6 +93,21 @@
     permanent = [];
   }
 
+  // 游戏推广卡是独立开关（hideGame），不属于浮层显隐体系：
+  // 用单独的 data-dyc-game 标记、单独清理。这样关掉「浮层自动隐藏」时它照样隐藏，
+  // 也不会被 clearPermanent() 当成推广浮层一起恢复。
+  let gameMarked = [];
+  function hideGameCard(el) {
+    if (!el || el.nodeType !== 1) return;
+    el.setAttribute('data-dyc-game', '');
+    if (gameMarked.indexOf(el) === -1) gameMarked.push(el);
+  }
+  function clearGameMarks() {
+    gameMarked.forEach(el => el.removeAttribute('data-dyc-game'));
+    gameMarked = [];
+    document.querySelectorAll('[data-dyc-game]').forEach(el => el.removeAttribute('data-dyc-game'));
+  }
+
   function mark(el) {
     if (!el || el.nodeType !== 1 || marked.indexOf(el) !== -1) return;
     el.setAttribute('data-dyc-ui', '');
@@ -283,7 +298,8 @@
 
     const near = el => {
       const r = el.getBoundingClientRect();
-      if (r.width < 40 || r.height < 12 || r.width > 320 || r.height > 48) return null;
+      // 宽度随游戏名变长（实测「游戏 绝区零 · 评分高达9.1」314px），上限留足余量
+      if (r.width < 40 || r.height < 12 || r.width > 420 || r.height > 48) return null;
       if (vr.width && !D.near(r, vr, 48)) return null;
       if (el.closest('[data-e2e*="comment"], [class*="comment-list"], [class*="comment-panel"]')) return null;
       if (el.closest('.video-info-detail, [data-e2e*="video-info"]')) return null;
@@ -294,7 +310,7 @@
     let n = 0;
     for (const el of card.querySelectorAll('[class*="game-anchor" i], [data-e2e*="game-anchor" i], [class*="gameAnchor" i]')) {
       if (++n > 6) break;
-      if (near(el)) { hidePermanent(el); gameDone = true; return; }
+      if (near(el)) { hideGameCard(el); gameDone = true; return; }
     }
 
     // 2) 按文案找小卡片；向上取到包含它的最大小容器，连图标一起藏
@@ -310,10 +326,33 @@
         if (!isGameText(D.textOf(p))) break;
         box = p;
       }
-      hidePermanent(box);
+      hideGameCard(box);
       gameDone = true;
       return;
     }
+  }
+
+  // 游戏推广卡的独立同步入口：不经过 enabled()，
+  // 所以关掉「浮层自动隐藏」后它仍然按 hideGame 开关隐藏。
+  function syncGameCard(force) {
+    if (!D.route.player) return;
+    if (D.settings && D.settings.hideGame === false) {
+      clearGameMarks();
+      gameDone = false;
+      return;
+    }
+    if (!force && (gameDone || tickLeft <= 0)) return;
+    const v = activeVideo() || currentVideo || D.playingVideo();
+    if (!v || !v.isConnected || D.isOverlayVideo(v)) return;
+    let vr = v.getBoundingClientRect();
+    // 暂停 / 图文时 <video> 矩形为 0，退回整张卡片
+    if (!vr.width || !vr.height) {
+      const card = v.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"]');
+      vr = card ? card.getBoundingClientRect() : vr;
+    }
+    if (!vr.width || !vr.height) return;
+    if (!force) tickLeft--;
+    markGame(v, vr);
   }
 
   // 画面里内嵌的「直播小窗」：一个 337×189 的推荐窗，内部叠 <video> + <canvas>，
@@ -491,6 +530,41 @@
     return hits;
   }
 
+  // 文案下方的 AI 按钮（当前文案「识别画面」，以后会随视频变）。
+  // 真机结构：[data-e2e="video-info"] > div > [作者行, 标题, AI 按钮, 作者声明…]。
+  // AI 按钮的特征：整行宽、高度 48 左右；而标题 28、作者声明 22，都更矮。
+  // 所以按「整行宽 + 高度 32~72 + 短文案」定位，不依赖会变的具体文案。
+  function syncAi() {
+    const on = !!(D.settings && D.settings.uiHide && D.settings.uiHide.ai);
+    document.querySelectorAll('[data-dyc-ai-hide]').forEach(el => {
+      el.removeAttribute('data-dyc-ai-hide');
+    });
+    if (!on) return;
+    // 页面里有多张卡片，每张都有 video-info；取第一个会标到视口外的卡片上
+    // （表现为"勾了 AI 但当前视频的按钮 / 相关搜索没被隐藏"）。优先当前播放卡片。
+    const card = document.querySelector('[data-e2e="feed-active-video"]');
+    const info = (card && card.querySelector('[data-e2e="video-info"]')) || document.querySelector('[data-e2e="video-info"]');
+    if (!info) return;
+    const ir = info.getBoundingClientRect();
+    if (!ir.width || !ir.height) return;
+    const box = info.firstElementChild;
+    if (!box) return;
+    const kids = Array.from(box.children);
+    // 文案下方的附加卡片（AI 按钮 / 相关搜索 / 音乐卡）都排在标题之后；
+    // 作者行在标题之前。按「标题之后」筛选，天然排除作者，不依赖类名哈希。
+    const ti = kids.findIndex(el => /title/i.test(String(el.className || '')));
+    for (let i = kids.length - 1; i > ti; i--) {
+      const el = kids[i];
+      const r = el.getBoundingClientRect();
+      if (r.width < 120 || r.height < 32 || r.height > 72) continue;
+      if (r.width > ir.width + 4) continue;
+      if (el.matches('[class*="account"]') || el.querySelector('[data-e2e*="nickname"], [data-e2e*="avatar"], [data-e2e*="follow"]')) continue;
+      const t = String(el.textContent || '').trim();
+      if (!t || t.length > 30) continue;
+      el.setAttribute('data-dyc-ai-hide', '');
+    }
+  }
+
   function sync(video) {
     if (!enabled()) {
       clearTimeout(timer);
@@ -498,6 +572,9 @@
       if (!html.classList.contains('dyc-ui-on')) html.classList.add('dyc-ui-on');
       clearMarks();
       clearPermanent();
+      // 浮层总开关关掉时，游戏推广卡与 AI 卡片仍按各自开关隐藏
+      syncGameCard(true);
+      try { syncAi(); } catch (e) { /* 忽略 */ }
       currentVideo = null;
       currentRect = null;
       return;
@@ -519,6 +596,7 @@
       syncAt = performance.now();
       currentRect = cr;
       clearMarks();
+      syncAi();
       markGame(v, cr);
       markPromos();
       recDone = markRecommend(v, cr) > 0;
@@ -537,6 +615,7 @@
     rectAt = now;
 
     clearMarks();
+    syncAi();
     markInfo(vr);
     markRail(vr);
     markOverlays(v, vr);
@@ -557,6 +636,20 @@
     pending = null;
     if (!enabled()) return;
     if (!e || !D.route.player) return;
+
+    // 评论区是独立面板：鼠标落在面板里时不唤出浮层（并立刻收起）。
+    // 只按坐标判断，不整段屏蔽 —— 评论区开着时鼠标回到画面，浮层照常显示
+    // （头像 / 文案 / 控制条 / 箭头都要能唤出来）。
+    const pane = document.querySelector('[data-e2e="comment-list"]');
+    const pr = pane && pane.getBoundingClientRect();
+    const overPane = !!(pr && pr.width > 200 && pr.height > 100 &&
+      e.clientX >= pr.left && e.clientX <= pr.right &&
+      e.clientY >= pr.top && e.clientY <= pr.bottom);
+    if (overPane) {
+      if (wasInside) wasInside = false;
+      hide();
+      return;
+    }
 
     // 画面矩形按需刷新：最多每 250ms 读一次布局，既不会用到换视频/开评论后的旧尺寸，
     // 也不会给每帧增加布局开销。
@@ -602,12 +695,14 @@
     // 一直在画面外移动时什么都不做，避免无限推迟隐藏
   }
 
+  // 用捕获阶段：评论面板内部可能 stopPropagation，冒泡到 document 就收不到，
+  // 表现为"在评论里动鼠标仍然弹出浮层"。
   document.addEventListener('pointermove', e => {
     if (!D.route.player) return;
     pending = e;
     if (raf) return;
     raf = requestAnimationFrame(onMove);
-  }, { passive: true });
+  }, { passive: true, capture: true });
 
   // 滚轮不会触发 pointermove；指针停在画面上滑动滚轮时也让浮层显示
   document.addEventListener('wheel', e => {
@@ -645,24 +740,26 @@
     // 暂停时补标游戏卡片：抖音的推广卡常在暂停后才渲染，而且此时 <video> 被暂停层
     // 盖住、矩形为 0，用所在卡片的矩形作参照（由 main.js 的 pause 监听调用）。
     hideGameNow() {
-      if (!enabled() || !D.route.player) return;
-      const v = activeVideo() || currentVideo || D.playingVideo();
-      if (!v || !v.isConnected || D.isOverlayVideo(v)) return;
-      let vr = v.getBoundingClientRect();
-      if (!vr.width || !vr.height) {
-        const card = v.closest('[data-e2e="feed-active-video"], [data-e2e="feed-item"]');
-        vr = card ? card.getBoundingClientRect() : vr;
+      if (!D.route.player) return;
+      if (enabled()) {
+        try { markPromos(); } catch (err) { /* 忽略 */ }
       }
-      if (!vr.width || !vr.height) return;
-      markPromos();
-      markGame(v, vr);
+      syncGameCard(true);
     },
     // 周期性补标（main.js 的 2 秒看门狗调用）：游戏卡片 / 推荐卡片经常比视频晚一步渲染，
     // 只在换片时标一次会漏。这里只扫左下角两类小卡片，每个视频最多补 6 次（约 12 秒）。
     tick() {
-      if (!enabled() || !D.route.player) return;
+      if (!D.route.player) return;
+      if (!enabled()) {
+        // 浮层总开关关闭时，只补标有独立开关的游戏推广卡与 AI 卡片
+        try { syncGameCard(); } catch (err) { /* 忽略 */ }
+        try { syncAi(); } catch (err) { /* 忽略 */ }
+        return;
+      }
       // 热播头像浮窗 / 内嵌直播小窗随时会被重新挂载，先无条件补标，不被下面的次要任务计数挡住
       try { markPromos(); } catch (err) { /* 单个浮窗异常不影响其余补标 */ }
+      // AI 按钮随换片重渲染，没勾选时这里只是廉价清理
+      try { syncAi(); } catch (err) { /* 忽略 */ }
       if (gameDone && recDone) return;
       if (tickLeft <= 0) return;
       const v = activeVideo() || currentVideo || D.playingVideo();
@@ -679,8 +776,10 @@
       if (!recDone) recDone = markRecommend(v, vr) > 0;
     },
     applySettings() {
-      // 关掉「游戏卡片」开关时，把之前永久隐藏的卡片恢复回来
-      if (D.settings && D.settings.hideGame === false) clearPermanent();
+      // 游戏卡片开关独立于浮层显隐：关掉立即恢复，开着立即补标
+      try { syncGameCard(true); } catch (e) { /* 忽略 */ }
+      // AI 开关独立于浮层显隐，勾选状态一变就立即重标 / 清标
+      try { syncAi(); } catch (e) { /* 忽略 */ }
       if (!D.route.player) {
         clearMarks();
         clearPermanent();
@@ -705,6 +804,7 @@
     reset() {
       clearMarks();
       clearPermanent();
+      clearGameMarks();
       hide();
       currentVideo = null;
       currentRect = null;

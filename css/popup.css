@@ -49,14 +49,22 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* 面板高度固定，由 main 自己滚动。
+ * 以前是 body 设 max-height 600 + overflow auto，结果内容一多整页被撑高，
+ * Chrome 弹窗只能在窗口底边处硬截断，「页面元素」最后几项（含 AI）露不出来也点不到。
+ * 现在头部与底部固定，中间列表滚动，任何一项都能滚到。 */
+html { height: 100%; }
+
 body {
+  display: flex;
+  flex-direction: column;
+  height: 600px;
   max-height: 600px;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
-body::-webkit-scrollbar { width: 8px; }
-body::-webkit-scrollbar-thumb {
+main::-webkit-scrollbar { width: 8px; }
+main::-webkit-scrollbar-thumb {
   background: rgba(124, 130, 142, .28);
   border-radius: 99px;
   border: 2px solid transparent;
@@ -65,6 +73,7 @@ body::-webkit-scrollbar-thumb {
 
 /* ---------- 顶部 ---------- */
 .top {
+  flex: none;
   position: sticky;
   top: 0;
   z-index: 2;
@@ -176,6 +185,10 @@ body[data-conn="on"] .dot {
 main {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   gap: 10px;
   padding: 12px 14px 4px;
 }
@@ -227,6 +240,9 @@ h2 {
 }
 
 .row-static { cursor: default; }
+
+/* 带箭头展开的标题行：整行不再可点，避免误切开关 */
+.row-head { cursor: default; }
 
 .row-main {
   display: flex;
@@ -350,7 +366,133 @@ label.row:hover .row-title { color: var(--accent); }
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
-/* ---------- 展开区 ---------- */
+/* ---------- 手动屏蔽：关键词输入与规则列表 ---------- */
+.rule-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 6px;
+}
+
+.rule-input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+  color: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.rule-input:focus {
+  border-color: var(--accent);
+}
+
+.rule-input::placeholder {
+  color: var(--muted);
+}
+
+.rule-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 8px;
+}
+
+.rule-list:empty {
+  display: none;
+}
+
+.rule-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px 3px 8px;
+  border-radius: 999px;
+  background: var(--soft);
+  font-size: 11px;
+  max-width: 100%;
+}
+
+.rule-item > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.rule-item button {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.rule-item button:hover {
+  background: var(--line);
+  color: inherit;
+}
+
+/* 「页面元素」折叠卡片：标题 + 一键开关 + 展开箭头 */
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 1px 0 4px;
+}
+
+.card-head h2 {
+  flex: 1;
+  margin: 0;
+}
+
+.mini-switch {
+  display: inline-flex;
+  align-items: center;
+}
+
+.mini-switch input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.arrow-btn {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.arrow-btn:hover {
+  border-color: var(--muted);
+}
+
+.arrow-btn svg {
+  transition: transform .18s ease;
+}
+
+.arrow-btn[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
 .fold {
   margin: 4px 0 8px;
   padding: 10px 11px;
@@ -413,6 +555,12 @@ label.row:hover .row-title { color: var(--accent); }
 .chip:has(input:checked) {
   border-color: rgba(254, 44, 85, .4);
   background: var(--accent-soft);
+}
+
+/* 依赖项被隐藏时（例如勾「顶栏」后「搜索框」失去意义），整枚 chip 灰显禁用 */
+.chip.is-disabled {
+  opacity: .4;
+  pointer-events: none;
 }
 
 /* ---------- 颜色 ---------- */
@@ -498,6 +646,7 @@ label.row:hover .row-title { color: var(--accent); }
 
 /* ---------- 底部 ---------- */
 .foot {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
